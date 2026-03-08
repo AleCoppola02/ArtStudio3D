@@ -1,8 +1,9 @@
-Shader "Unlit/MultiplySimple"
+Shader "Painting/MultiplySimple"
 {
     Properties
     {
         _MainTex ("Ink Layer (Auto)", 2D) = "white" {}
+        _Opacity ("Opacity", Range(0,1)) = 0.5
     }
     SubShader
     {
@@ -24,6 +25,7 @@ Shader "Unlit/MultiplySimple"
             };
 
             sampler2D _MainTex;
+            float _Opacity;
 
             v2f vert (appdata_base v) 
             {
@@ -35,7 +37,19 @@ Shader "Unlit/MultiplySimple"
 
             float4 frag (v2f i) : SV_Target
             {
-                return tex2D(_MainTex, i.uv);
+                // 1. Get the accumulated ink strength from your brush buffer
+                float4 stroke = tex2D(_MainTex, i.uv);
+                
+                // 2. Apply the Opacity "Cap" [cite: 23]
+                float mask = stroke.a * _Opacity;
+
+                // 3. The Identity Logic: 
+                // We LERP the output color between White (no change) and our Brush Color.
+                // If mask is 0, we return (1,1,1), which leaves the canvas untouched.
+                float3 outputRGB = lerp(float3(1, 1, 1), stroke.rgb, mask);
+
+                return float4(outputRGB, 1.0);
+
             }
             ENDCG
         }

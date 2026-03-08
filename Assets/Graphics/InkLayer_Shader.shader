@@ -1,9 +1,9 @@
-Shader "Unlit/InkLayer"
+Shader "Painting/InkLayer"
 {
     Properties
     {
         _MainTex ("Brush Shape", 2D) = "white" {}
-        _Color ("Brush Color", Color) = (0,0,0,1)
+        _Color ("Brush Color", Color) = (1,1,1,0)
         _Opacity ("Opacity", Range(0,1)) = 0.5
     }
     SubShader
@@ -11,8 +11,9 @@ Shader "Unlit/InkLayer"
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
 
-        BlendOp Min
-        Blend One One
+        // Standard Alpha Blending for the final output to screen
+        Blend SrcAlpha OneMinusSrcAlpha
+        ZWrite Off
 
         Pass
         {
@@ -39,11 +40,12 @@ Shader "Unlit/InkLayer"
 
             float4 frag (v2f i) : SV_Target
             {
-                float mask = tex2D(_MainTex, i.uv).r;
+                float4 stroke = tex2D(_MainTex, i.uv);
+                float finalAlpha = stroke.a * _Opacity; // Apply opacity to the alpha channel
     
-                float3 pencilRGB = lerp(float3(1, 1, 1), _Color.rgb, mask);
+                //float3 pencilRGB = lerp(float3(1, 1, 1), _Color.rgb, mask);
 
-                return float4(pencilRGB, 1.0);
+                return float4(_Color.rgb, finalAlpha);
             }
             ENDCG
         }

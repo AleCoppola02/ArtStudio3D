@@ -11,9 +11,20 @@ public class TruePencil : MonoBehaviour
     [Range(1, 400)]public float brushSize = 50f;
     public Color brushColor = Color.black;
     [Range(0, 1)] public float opacity = 0.5f;
+    [Header("Performance")]
+    [Range(0.1f, 60f)]
+    public float maxDrawsPerSecond = 3f;
+    [Range(930.5f, 933f)]
+    public float spacingFactor = 931.4f;
+
+
+    private float secondsSinceLastDraw = 1000f;
 
     private Vector2 lastUV;
     private bool isDrawing = false;
+    private enum DragState {None, Clicked, Dragging }
+    private DragState dragState = DragState.None;
+
 
     void Start() {
         ClearCanvas();
@@ -21,8 +32,46 @@ public class TruePencil : MonoBehaviour
     }
 
     void Update() {
+        //test();
+        HandleInputs();
+    }
+
+    // Handle mouse input and drawing logic
+    private void HandleInputs() {
         if (Input.GetMouseButton(0)) {
+            dragState = dragState == DragState.None ? DragState.Clicked : DragState.Dragging;
             if (GetHitUV(out Vector2 currentUV)) {
+                if (!isDrawing) {
+                    lastUV = currentUV;
+                    isDrawing = true;
+                }
+
+                DrawLine(lastUV, currentUV);
+
+                
+
+                lastUV = currentUV;
+
+            }
+            else {
+                isDrawing = false;
+            }
+        }
+        else {
+            if(dragState != DragState.None) {
+                ApplyInkToCanvas();
+                ClearInkLayer();
+            }
+            dragState = DragState.None;
+            isDrawing = false;
+        }
+    }
+
+    private void test() {
+        if (Input.GetMouseButton(0)) {
+            // check if we hit the canvas
+            if (GetHitUV(out Vector2 currentUV)) {
+                // If we weren't already drawing, start a new stroke
                 if (!isDrawing) {
                     lastUV = currentUV;
                     isDrawing = true;
@@ -40,19 +89,35 @@ public class TruePencil : MonoBehaviour
         }
     }
 
-    void ApplyInkToCanvas() {
-        RenderTexture.active = canvasRT;
-        GL.Clear(true, true, Color.white);
-        RenderTexture.active = null;
-
+void ApplyInkToCanvas() {
         Graphics.Blit(inkLayerRT, canvasRT, compositeMaterial);
     }
 
     void DrawLine(Vector2 start, Vector2 end) {
         // Calculate stamps needed based on distance and brush size
-        float distance = Vector2.Distance(start, end);
-        int steps = Mathf.Max(1, Mathf.CeilToInt(distance * canvasRT.width / (brushSize * 0.2f)));
+        
+        // Convert UV-space delta into pixel-space delta using both width and height.
+        float dx = (end.x - start.x) * canvasRT.width;
+        float dy = (end.y - start.y) * canvasRT.height;
+        float pixelDistance = Mathf.Sqrt(dx * dx + dy * dy);
 
+        Debug.Log(dragState.ToString());
+        int steps = Mathf.Max(1, Mathf.CeilToInt(pixelDistance / (brushSize * spacingFactor/100000)));
+        Debug.Log(steps);
+        // Throttle when there's only a single stamp (short moves).
+        if (dragState != DragState.Clicked && steps == 1) {
+            if (secondsSinceLastDraw < 1f / maxDrawsPerSecond) {
+                secondsSinceLastDraw += Time.deltaTime;
+                return;
+            }
+            else {
+                secondsSinceLastDraw = 0f;
+            }
+        }
+        else {
+            // A multi-stamp stroke is drawn immediately, reset timer so subsequent single-stamp moves are throttled.
+            secondsSinceLastDraw = 0f;
+        }
         RenderTexture.active = inkLayerRT;
 
 
@@ -112,7 +177,7 @@ public class TruePencil : MonoBehaviour
 
     public void ClearInkLayer() {
         RenderTexture.active = inkLayerRT;
-        GL.Clear(true, true, Color.white); // Clear to white
+        GL.Clear(true, true, Color.clear);
         RenderTexture.active = null;
     }
 }
