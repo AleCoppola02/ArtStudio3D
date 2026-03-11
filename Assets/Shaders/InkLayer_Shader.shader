@@ -40,9 +40,11 @@ Shader "Painting/InkLayer"
 
             float4 frag (v2f i) : SV_Target
             {
+                
                 float4 stroke = tex2D(_MainTex, i.uv);
                 float4 canvas = tex2D(_CanvasTex, i.uv);
                 float addedAlpha= stroke.a + canvas.a;
+                
                 //where there is no stroke (stroke.a is 0), set addedAlpha to 0 to avoid affecting the canvas
                 addedAlpha = lerp(0, addedAlpha, step(0.001, stroke.a));
                 float finalAlpha = min(addedAlpha, _Opacity);

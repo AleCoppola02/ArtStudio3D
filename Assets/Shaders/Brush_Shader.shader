@@ -5,7 +5,7 @@ Shader "Painting/SimpleBrush"
         _MainTex ("Brush Shape", 2D) = "white" {}
         _Color ("Brush Color", Color) = (0,0,0,1)
         _Opacity ("Opacity", Range(0,1)) = 0.5
-        _Flow ("Flow", Range(0,1)) = 0.5
+        _Flow ("Flow", Range(0,1)) = 0.1
     }
     SubShader
     {
