@@ -1,4 +1,4 @@
-Shader "Painting/MultiplySimple"
+Shader "Painting/CompositeShader"
 {
     Properties
     {
@@ -8,9 +8,8 @@ Shader "Painting/MultiplySimple"
     SubShader
     {
         Tags { "RenderType"="Opaque" }
-        ZWrite Off ZTest Always Cull Off
         
-        Blend DstColor Zero 
+        Blend One Zero
 
         Pass
         {
@@ -39,16 +38,8 @@ Shader "Painting/MultiplySimple"
             {
                 // 1. Get the accumulated ink strength from your brush buffer
                 float4 stroke = tex2D(_MainTex, i.uv);
-                
-                // 2. Apply the Opacity "Cap" [cite: 23]
-                float mask = stroke.a * _Opacity;
 
-                // 3. The Identity Logic: 
-                // We LERP the output color between White (no change) and our Brush Color.
-                // If mask is 0, we return (1,1,1), which leaves the canvas untouched.
-                float3 outputRGB = lerp(float3(1, 1, 1), stroke.rgb, mask);
-
-                return float4(outputRGB, 1.0);
+                return float4(stroke);
 
             }
             ENDCG

@@ -5,8 +5,10 @@ public class TruePencil : MonoBehaviour
     [Header("Connections")]
     public RenderTexture canvasRT;
     public RenderTexture inkLayerRT; 
+    private RenderTexture tempRT; // For compositing
     public Material brushMaterial; 
     public Material compositeMaterial;
+    public Material inkLayerMaterial; 
     [Header("Brush Settings")]
     [Range(1, 400)]public float brushSize = 50f;
     public Color brushColor = Color.black;
@@ -18,6 +20,8 @@ public class TruePencil : MonoBehaviour
     public float spacingFactor = 931.4f;
 
 
+    private Color canvasColor = new Vector4(1, 1, 1, 0);
+    private Color inkLayerColor = new Vector4(1, 1, 1, 0);
     private float secondsSinceLastDraw = 1000f;
 
     private Vector2 lastUV;
@@ -29,6 +33,9 @@ public class TruePencil : MonoBehaviour
     void Start() {
         ClearCanvas();
         ClearInkLayer();
+        inkLayerMaterial.SetTexture("_CanvasTex", canvasRT);
+        tempRT = new RenderTexture(canvasRT.width, canvasRT.height, 0, canvasRT.format);
+
     }
 
     void Update() {
@@ -60,7 +67,8 @@ public class TruePencil : MonoBehaviour
         else {
             if(dragState != DragState.None) {
                 ApplyInkToCanvas();
-                ClearInkLayer();
+                
+                dragState = DragState.None;
             }
             dragState = DragState.None;
             isDrawing = false;
@@ -90,7 +98,12 @@ public class TruePencil : MonoBehaviour
     }
 
 void ApplyInkToCanvas() {
-        Graphics.Blit(inkLayerRT, canvasRT, compositeMaterial);
+        Graphics.Blit(canvasRT, tempRT); // Copy current canvas to temp
+        inkLayerMaterial.SetTexture("_CanvasTex", tempRT); // Set temp as input for compositing
+        Graphics.Blit(inkLayerRT, canvasRT, inkLayerMaterial); // Composite ink layer onto canvas using inkLayerMaterial
+        
+        ClearInkLayer(); // Clear ink layer for next stroke
+
     }
 
     void DrawLine(Vector2 start, Vector2 end) {
@@ -171,13 +184,13 @@ void ApplyInkToCanvas() {
 
     public void ClearCanvas() {
         RenderTexture.active = canvasRT;
-        GL.Clear(true, true, Color.white);
+        GL.Clear(true, true, canvasColor);
         RenderTexture.active = null;
     }
 
     public void ClearInkLayer() {
         RenderTexture.active = inkLayerRT;
-        GL.Clear(true, true, Color.clear);
+        GL.Clear(true, true, inkLayerColor);
         RenderTexture.active = null;
     }
 }

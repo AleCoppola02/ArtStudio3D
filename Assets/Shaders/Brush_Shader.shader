@@ -1,19 +1,24 @@
-Shader "Painting/InkLayer"
+Shader "Painting/SimpleBrush"
 {
     Properties
     {
         _MainTex ("Brush Shape", 2D) = "white" {}
-        _Color ("Brush Color", Color) = (1,1,1,0)
+        _Color ("Brush Color", Color) = (0,0,0,1)
         _Opacity ("Opacity", Range(0,1)) = 0.5
+        _Flow ("Flow", Range(0,1)) = 0.5
     }
     SubShader
     {
+        // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
-
-        // Standard Alpha Blending for the final output to screen
-        Blend SrcAlpha OneMinusSrcAlpha
+        // Ignores the scene depth entirely
         ZWrite Off
+        ZTest Always
+        Cull Off
+
+
+        Blend One One
 
         Pass
         {
@@ -28,6 +33,7 @@ Shader "Painting/InkLayer"
             sampler2D _MainTex;
             float4 _Color;
             float _Opacity;
+            float _Flow;
 
             v2f vert (appdata v)
             {
@@ -38,14 +44,22 @@ Shader "Painting/InkLayer"
                 return o;
             }
 
-            float4 frag (v2f i) : SV_Target
+            float4  frag (v2f i) : SV_Target
             {
-                float4 stroke = tex2D(_MainTex, i.uv);
-                float finalAlpha = stroke.a * _Opacity; // Apply opacity to the alpha channel
-    
-                //float3 pencilRGB = lerp(float3(1, 1, 1), _Color.rgb, mask);
+                /*float mask = tex2D(_MainTex, i.uv).r;
 
-                return float4(_Color.rgb, finalAlpha);
+
+                float finalStrength = mask * _Opacity;
+                float3 finalRGB = lerp(float3(1, 1, 1), _Color.rgb, finalStrength);
+
+                return float4(finalRGB, 1.0);*/
+
+                // Sample the brush shape (usually a soft radial gradient)
+                float shape = tex2D(_MainTex, i.uv).r;
+                
+                // Multiply the shape by Flow. 
+                // We return this as the alpha.
+                return float4(0,0,0, _Flow * shape);
             }
             ENDCG
         }

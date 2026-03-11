@@ -1,26 +1,19 @@
-Shader "Painting/SimpleBrush"
+Shader "Painting/InkLayer"
 {
     Properties
     {
-        _MainTex ("Brush Shape", 2D) = "white" {}
-        _Color ("Brush Color", Color) = (0,0,0,1)
+        _MainTex ("InkLayer", 2D) = "white" {}
+        _CanvasTex("Canvas Texture", 2D) = "white" {}
+        _Color ("Brush Color", Color) = (0,0,0,0)
         _Opacity ("Opacity", Range(0,1)) = 0.5
-        _Flow ("Flow", Range(0,1)) = 0.5
     }
     SubShader
     {
+        ZWrite On
         // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
-        // Ignores the scene depth entirely
-        ZWrite Off
-        ZTest Always
-        Cull Off
-
-
-        Blend One One
-
-
+        Blend SrcAlpha OneMinusSrcAlpha, One One
         Pass
         {
             CGPROGRAM
@@ -32,9 +25,9 @@ Shader "Painting/SimpleBrush"
             struct v2f { float4 vertex : SV_POSITION; float2 uv : TEXCOORD0; };
 
             sampler2D _MainTex;
+            sampler2D _CanvasTex;
             float4 _Color;
             float _Opacity;
-            float _Flow;
 
             v2f vert (appdata v)
             {
@@ -45,22 +38,17 @@ Shader "Painting/SimpleBrush"
                 return o;
             }
 
-            float4  frag (v2f i) : SV_Target
+            float4 frag (v2f i) : SV_Target
             {
-                /*float mask = tex2D(_MainTex, i.uv).r;
+                float4 stroke = tex2D(_MainTex, i.uv);
+                float4 canvas = tex2D(_CanvasTex, i.uv);
+                float addedAlpha= stroke.a + canvas.a;
+                //where there is no stroke (stroke.a is 0), set addedAlpha to 0 to avoid affecting the canvas
+                addedAlpha = lerp(0, addedAlpha, step(0.001, stroke.a));
+                float finalAlpha = min(addedAlpha, _Opacity);
+    
 
-
-                float finalStrength = mask * _Opacity;
-                float3 finalRGB = lerp(float3(1, 1, 1), _Color.rgb, finalStrength);
-
-                return float4(finalRGB, 1.0);*/
-
-                // Sample the brush shape (usually a soft radial gradient)
-                float shape = tex2D(_MainTex, i.uv).r;
-                
-                // Multiply the shape by Flow. 
-                // We return this as the alpha.
-                return float4(0,0,0, _Flow * shape);
+                return float4(_Color.rgb, finalAlpha);
             }
             ENDCG
         }
