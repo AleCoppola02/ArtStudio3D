@@ -4,7 +4,6 @@ Shader "Painting/SimpleBrush"
     {
         _MainTex ("Brush Shape", 2D) = "white" {}
         _Color ("Brush Color", Color) = (0,0,0,1)
-        _Opacity ("Opacity", Range(0,1)) = 0.5
         _Flow ("Flow", Range(0,1)) = 0.1
     }
     SubShader
@@ -18,7 +17,7 @@ Shader "Painting/SimpleBrush"
         Cull Off
 
 
-        Blend One One
+        Blend One Zero, One One
 
         Pass
         {
@@ -32,7 +31,6 @@ Shader "Painting/SimpleBrush"
 
             sampler2D _MainTex;
             float4 _Color;
-            float _Opacity;
             float _Flow;
 
             v2f vert (appdata v)
@@ -59,7 +57,7 @@ Shader "Painting/SimpleBrush"
                 
                 // Multiply the shape by Flow. 
                 // We return this as the alpha.
-                return float4(0,0,0, _Flow * shape);
+                return float4(_Color.rgb, _Flow * shape);
             }
             ENDCG
         }

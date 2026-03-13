@@ -4,12 +4,11 @@ Shader "Painting/InkLayer"
     {
         _MainTex ("InkLayer", 2D) = "white" {}
         _CanvasTex("Canvas Texture", 2D) = "white" {}
-        _Color ("Brush Color", Color) = (0,0,0,0)
         _Opacity ("Opacity", Range(0,1)) = 0.5
     }
     SubShader
     {
-        ZWrite On
+        ZWrite Off
         // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
@@ -26,7 +25,6 @@ Shader "Painting/InkLayer"
 
             sampler2D _MainTex;
             sampler2D _CanvasTex;
-            float4 _Color;
             float _Opacity;
 
             v2f vert (appdata v)
@@ -40,7 +38,7 @@ Shader "Painting/InkLayer"
 
             float4 frag (v2f i) : SV_Target
             {
-                
+                /*   
                 float4 stroke = tex2D(_MainTex, i.uv);
                 float4 canvas = tex2D(_CanvasTex, i.uv);
                 float addedAlpha= stroke.a + canvas.a;
@@ -50,7 +48,17 @@ Shader "Painting/InkLayer"
                 float finalAlpha = min(addedAlpha, _Opacity);
     
 
-                return float4(_Color.rgb, finalAlpha);
+                return float4(_Color.rgb, finalAlpha);*/
+                float4 stroke = tex2D(_MainTex, i.uv);
+                
+                // Cap the stroke's strength, but do NOT add the canvas here.
+                float finalAlpha = min(stroke.a, _Opacity);
+                
+                // If stroke.a is 0, finalAlpha is 0. 
+                // The hardware blender will naturally ignore the canvas where alpha is 0!
+                return float4(stroke.rgb, finalAlpha);
+
+
             }
             ENDCG
         }

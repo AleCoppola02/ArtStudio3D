@@ -4,6 +4,7 @@ Shader "Painting/CompositeShader"
     {
         _MainTex ("Ink Layer (Auto)", 2D) = "white" {}
         _Opacity ("Opacity", Range(0,1)) = 0.5
+        _Color ("Color", Color) = (0,0,0,1)
     }
     SubShader
     {
@@ -25,6 +26,7 @@ Shader "Painting/CompositeShader"
 
             sampler2D _MainTex;
             float _Opacity;
+            float4 _Color;
 
             v2f vert (appdata_base v) 
             {
@@ -39,7 +41,7 @@ Shader "Painting/CompositeShader"
                 // 1. Get the accumulated ink strength from your brush buffer
                 float4 stroke = tex2D(_MainTex, i.uv);
 
-                return float4(stroke);
+                return float4(_Color.rgb, stroke.r);
 
             }
             ENDCG

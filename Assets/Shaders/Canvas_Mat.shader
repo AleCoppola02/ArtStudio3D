@@ -39,7 +39,7 @@ Shader "Painting/Canvas"
             {
                 float4 canvas = tex2D(_MainTex, i.uv);
 
-                return canvas;
+                return clamp(canvas, 0, 1);
             }
             ENDCG
         }

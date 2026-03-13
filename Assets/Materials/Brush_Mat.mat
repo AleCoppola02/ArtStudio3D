@@ -102,13 +102,13 @@ Material:
     - _DstBlend: 0
     - _DstBlendAlpha: 1
     - _EnvironmentReflections: 1
-    - _Flow: 0.002
+    - _Flow: 0.01
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _Metallic: 0
     - _OcclusionStrength: 1
-    - _Opacity: 0.5
+    - _Opacity: 0
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
