@@ -65,29 +65,7 @@ public class PencilPainter : MonoBehaviour
         return false;
     }
 
-    private void Start() {
-        SetBrushFlowUI(1);
-        SetBrushOpacityUI(1);
-        SetBrushSizeUI(1);
-    }
-    public void SetBrushOpacityUI(float opacity) {
-        // Implement UI logic to set brush opacity
-        brush.SetBrushOpacity((opacity/100));
-        opacityText.text = "" + opacity;
 
-    }
-    public void SetBrushFlowUI(float flow) {
-        // Implement UI logic to set brush flow
-        brush.SetBrushFlow((flow/100));
-        flowText.text = "" + flow;
-
-    }
-    public void SetBrushSizeUI(float size) {
-        // Implement UI logic to set brush opacity
-        brush.SetBrushSize(size);
-        sizeText.text = "" + size;
-
-    }
 
 
 }

@@ -42,7 +42,6 @@ public class Brush : MonoBehaviour
 
         
         int steps = Mathf.Max(1, Mathf.CeilToInt(pixelDistance / (brushSize * spacingFactor / 100000)));
-        Debug.Log(steps);
         // Throttle when there's only a single stamp (short moves).
         if (dragState != DragState.Clicked && steps == 1) {
             if (secondsSinceLastDraw < 1f / maxDrawsPerSecond) {
@@ -140,4 +139,5 @@ public class Brush : MonoBehaviour
     public void SetBrushOpacity(float opacity) {
         this.opacity = opacity;
     }
+
 }
