@@ -44,7 +44,7 @@ public class PencilPainter : MonoBehaviour
                 isDrawing = false;
             }
         }
-        else {
+        else if(Input.GetMouseButtonUp(0)) {
             if (dragState != DragState.None) {
                 brush.ApplyInkToCanvas();
 

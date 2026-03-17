@@ -50,7 +50,6 @@ Shader "Painting/InkLayer"
 
                 return float4(_Color.rgb, finalAlpha);*/
                 float4 stroke = tex2D(_MainTex, i.uv);
-                
                 // Cap the stroke's strength, but do NOT add the canvas here.
                 float finalAlpha = min(stroke.a, _Opacity);
                 

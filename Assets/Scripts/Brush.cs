@@ -1,8 +1,10 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using static PencilPainter;
 
 public class Brush : MonoBehaviour
 {
+
     public Material brushMaterial;
     public Material inkLayerMaterial;
     [Header("Brush Settings")]
@@ -34,16 +36,32 @@ public class Brush : MonoBehaviour
 
     public void DrawLine(Vector2 start, Vector2 end, DragState dragState) {
         // Calculate stamps needed based on distance and brush size
-
+        
         // Convert UV-space delta into pixel-space delta using both width and height.
         float dx = (end.x - start.x) * canvasRT.width;
         float dy = (end.y - start.y) * canvasRT.height;
         float pixelDistance = Mathf.Sqrt(dx * dx + dy * dy);
-
         
         int steps = Mathf.Max(1, Mathf.CeilToInt(pixelDistance / (brushSize * spacingFactor / 100000)));
         // Throttle when there's only a single stamp (short moves).
-        if (dragState != DragState.Clicked && steps == 1) {
+        /*if (dragState != DragState.Clicked && steps == 1) {
+            if (secondsSinceLastDraw < 1f / maxDrawsPerSecond) {
+                secondsSinceLastDraw += Time.deltaTime;
+                return;
+            }
+            else {
+                secondsSinceLastDraw = 0f;
+            }
+        }
+        else {
+            // A multi-stamp stroke is drawn immediately, reset timer so subsequent single-stamp moves are throttled.
+            secondsSinceLastDraw = 0f;
+        }*/
+
+        if(dragState == DragState.Clicked) {
+            secondsSinceLastDraw = 0f;
+        }
+        else if (dragState == DragState.Dragging && steps == 1) {
             if (secondsSinceLastDraw < 1f / maxDrawsPerSecond) {
                 secondsSinceLastDraw += Time.deltaTime;
                 return;

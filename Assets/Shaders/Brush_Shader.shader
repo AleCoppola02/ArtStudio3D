@@ -14,7 +14,7 @@ Shader "Painting/SimpleBrush"
         // Ignores the scene depth entirely
         ZWrite Off
         ZTest Always
-        Cull Off
+        Cull Back
 
 
         Blend One Zero, One One
@@ -57,7 +57,7 @@ Shader "Painting/SimpleBrush"
                 
                 // Multiply the shape by Flow. 
                 // We return this as the alpha.
-                return float4(_Color.rgb, _Flow * shape);
+                return float4(_Color.rgb, _Flow * shape/2);
             }
             ENDCG
         }

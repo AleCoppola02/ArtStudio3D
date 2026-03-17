@@ -2,9 +2,7 @@ Shader "Painting/Canvas"
 {
     Properties
     {
-        _MainTex ("Canvas RT", 2D) = "white" {}
-        _Color ("Brush Color", Color) = (0,0,0,0)
-        _Opacity ("Opacity", Range(0,1)) = 0.5
+        _MainTex ("Canvas RT", 2D) = "black" {}
     }
     SubShader
     {
@@ -23,8 +21,6 @@ Shader "Painting/Canvas"
 
             sampler2D _MainTex;
             sampler2D _CanvasTex;
-            float4 _Color;
-            float _Opacity;
 
             v2f vert (appdata v)
             {
