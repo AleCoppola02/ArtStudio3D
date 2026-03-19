@@ -10,13 +10,8 @@ public class PencilPainter : MonoBehaviour
 
     [SerializeField]
     private Brush brush;
-
     [SerializeField]
-    private TextMeshProUGUI opacityText;
-    [SerializeField]
-    private TextMeshProUGUI sizeText;
-    [SerializeField]
-    private TextMeshProUGUI flowText;
+    private InkLayer inkLayer;
 
     void Update() {
         //test();
@@ -46,7 +41,7 @@ public class PencilPainter : MonoBehaviour
         }
         else if(Input.GetMouseButtonUp(0)) {
             if (dragState != DragState.None) {
-                brush.ApplyInkToCanvas();
+                inkLayer.ApplyInkToCanvas();
 
                 dragState = DragState.None;
             }

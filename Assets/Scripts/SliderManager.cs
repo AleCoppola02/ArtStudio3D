@@ -21,6 +21,8 @@ public class SliderManager : MonoBehaviour
 
     [SerializeField]
     private Brush brush;
+    [SerializeField]
+    private InkLayer inkLayer;
 
     // We store these locally so the sliders can update them constantly 
     // without hitting the hard drive every frame.
@@ -28,13 +30,16 @@ public class SliderManager : MonoBehaviour
     private float currentFlow;
     private float currentSize;
 
+    private const string OPACITY_PREFS = "InkLayerOpacity";
+    private const string FLOW_PREFS = "BrushFlow";
+    private const string SIZE_PREFS = "BrushSize";
 
     private void Start() {
         // 1. Load the values from storage. 
         // We provide a "default" value (like 50f) in case it's the first time playing.
-        float savedOpacity = PlayerPrefs.GetFloat("BrushOpacity", 50f);
-        float savedFlow = PlayerPrefs.GetFloat("BrushFlow", 10f);
-        float savedSize = PlayerPrefs.GetFloat("BrushSize", 20f);
+        float savedOpacity = PlayerPrefs.GetFloat(OPACITY_PREFS, 50f);
+        float savedFlow = PlayerPrefs.GetFloat(FLOW_PREFS, 10f);
+        float savedSize = PlayerPrefs.GetFloat(SIZE_PREFS, 20f);
 
         // 2. Set the Slider handles to the saved positions
         opacitySlider.value = savedOpacity;
@@ -42,13 +47,13 @@ public class SliderManager : MonoBehaviour
         sizeSlider.value = savedSize;
 
         // 3. Manually call the functions once to sync the brush and text
-        SetBrushOpacityUI(savedOpacity);
+        SetInkLayerOpacityUI(savedOpacity);
         SetBrushFlowUI(savedFlow);
         SetBrushSizeUI(savedSize);
     }
 
-    public void SetBrushOpacityUI(float opacity) {
-        brush.SetBrushOpacity(opacity / 100f);
+    public void SetInkLayerOpacityUI(float opacity) {
+        inkLayer.SetOpacity(opacity / 100f);
         opacityText.text = $"{(int)opacity}%";
 
         currentOpacity = opacity;
@@ -70,9 +75,9 @@ public class SliderManager : MonoBehaviour
 
     private void OnDisable() {
         // This runs when the UI panel is closed or the game exits
-        PlayerPrefs.SetFloat("BrushOpacity", currentOpacity);
-        PlayerPrefs.SetFloat("BrushFlow", currentFlow);
-        PlayerPrefs.SetFloat("BrushSize", currentSize);
+        PlayerPrefs.SetFloat(OPACITY_PREFS, currentOpacity);
+        PlayerPrefs.SetFloat(FLOW_PREFS, currentFlow);
+        PlayerPrefs.SetFloat(SIZE_PREFS, currentSize);
 
         // Finalize the save to disk
         PlayerPrefs.Save();
