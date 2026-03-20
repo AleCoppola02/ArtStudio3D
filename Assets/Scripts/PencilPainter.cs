@@ -28,7 +28,7 @@ public class PencilPainter : MonoBehaviour
                     isDrawing = true;
                 }
 
-                brush.DrawLine(lastUV, currentUV, dragState);
+                brush.UseBrush(lastUV, currentUV, dragState);
 
 
 

@@ -1,4 +1,7 @@
+using JetBrains.Annotations;
+using NUnit;
 using Unity.VisualScripting;
+using Unity.VisualScripting.Antlr3.Runtime.Misc;
 using UnityEngine;
 using UnityEngine.Rendering;
 using static PencilPainter;
@@ -16,11 +19,14 @@ public class Brush : MonoBehaviour
     [Range(0.1f, 60f)]
     public float maxDrawsPerSecond = 3f;
     //[Range(930.5f, 933f)]
-    public float spacingFactor = 931.4f;
+    [Range(0.01f, 1f)]
+    public float spacingFactor = 0.05f;
 
     [Header("Connections")]
     public RenderTexture canvasRT;
     private float secondsSinceLastDraw = 1000f;
+
+    private float distanceSinceLastDraw = 0f;
 
     public InkLayer inkLayer;
     private RenderTexture inkLayerRT;
@@ -40,11 +46,12 @@ public class Brush : MonoBehaviour
         float dy = (end.y - start.y) * canvasRT.height;
         float pixelDistance = Mathf.Sqrt(dx * dx + dy * dy);
         return Mathf.Max(1, Mathf.CeilToInt(pixelDistance / (brushSize * spacingFactor / 100000)));
-        //return Mathf.Max(1, Mathf.CeilToInt(pixelDistance/(spacingFactor*brushSize)));
     }
 
-    public void DrawLine(Vector2 start, Vector2 end, DragState dragState) {
-        int steps = CalculateSteps(start, end);
+    public void UseBrush(Vector2 start, Vector2 end, DragState dragState) {
+        //int steps = CalculateSteps(start, end);
+
+        /*
         //This if block calculates whether to draw or not, based on how long it's been since the last stamp was drawn
         if(dragState == DragState.Clicked) {
             secondsSinceLastDraw = 0f;
@@ -61,8 +68,51 @@ public class Brush : MonoBehaviour
         else {
             // A multi-stamp stroke is drawn immediately, reset timer so subsequent single-stamp moves are throttled.
             secondsSinceLastDraw = 0f;
+        }*/
+        float brushSpacing = brushSize * spacingFactor; // i.e. 5% of brush size, so a 100px brush would draw a stamp every 5px.   
+
+        if (dragState == DragState.Clicked) {
+            distanceSinceLastDraw = brushSpacing; // Force a stamp to be drawn on click, even if the user doesn't move the mouse.
+            DrawLine(start, end, 1);
+            distanceSinceLastDraw = 0f;
+        }
+        else {
+            // Convert UV-space delta into pixel-space delta using both width and height.
+            float dx = (end.x - start.x) * canvasRT.width;
+            float dy = (end.y - start.y) * canvasRT.height;
+            float pixelDistance = Mathf.Sqrt(dx * dx + dy * dy);
+            distanceSinceLastDraw += pixelDistance;
+            
+            if (distanceSinceLastDraw < (brushSpacing)) {
+                return;
+            }
+            int steps = distanceSinceLastDraw / (brushSpacing) < 1 ? 1 : Mathf.CeilToInt(distanceSinceLastDraw / brushSpacing);
+            DrawLine(start, end, steps);
+            //DrawLine(steps, start, end);
+        }
+    }
+
+    private void DrawLine(Vector2 start, Vector2 end, int steps) {
+        brushMaterial.SetPass(0); // Tell GPU to use this material
+        RenderTexture.active = inkLayerRT;
+
+        //Setup Orthographic Space (0.0 to 1.0)
+        GL.PushMatrix();
+        GL.LoadOrtho();
+        // Draw raw quads batched for speed
+        GL.Begin(GL.QUADS);
+
+        for (; distanceSinceLastDraw >= (brushSize*spacingFactor); distanceSinceLastDraw -= (brushSize*spacingFactor)) {
+            Vector2 uv = Vector2.Lerp(start, end, (float)distanceSinceLastDraw / steps);
+            DrawStamp(uv);
         }
 
+        GL.End();
+        GL.PopMatrix();
+        RenderTexture.active = null;
+    }
+
+    private void DrawLine(int steps, Vector2 start, Vector2 end) {
         brushMaterial.SetPass(0); // Tell GPU to use this material
         RenderTexture.active = inkLayerRT;
 

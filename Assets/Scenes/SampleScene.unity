@@ -3479,7 +3479,7 @@ MonoBehaviour:
   brushMaterial: {fileID: 2100000, guid: 9d774e1eccd61824a90a85fa4786370b, type: 2}
   inkLayerMaterial: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
   maxDrawsPerSecond: 3
-  spacingFactor: 931.4
+  spacingFactor: 0.05
   canvasRT: {fileID: 8400000, guid: 09a910ce296790f47a2f24203af30e23, type: 2}
   inkLayer: {fileID: 1091343047}
   canvas: {fileID: 981973946}
