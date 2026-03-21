@@ -4,7 +4,7 @@ public class CanvasManager : MonoBehaviour
 {
     public RenderTexture canvasRT;
 
-    private Color canvasColor = new Vector4(1, 1, 1, 0);
+    private Color canvasColor = new Vector4(1, 1, 1, 1);
     public RenderTexture GetCanvasRT() {
         return canvasRT;
     }

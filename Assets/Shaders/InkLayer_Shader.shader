@@ -12,7 +12,8 @@ Shader "Painting/InkLayer"
         // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
-        Blend SrcAlpha OneMinusSrcAlpha, One One
+        //Blend SrcAlpha OneMinusSrcAlpha, One One
+        Blend One OneMinusSrcAlpha
         Pass
         {
             CGPROGRAM
@@ -38,17 +39,8 @@ Shader "Painting/InkLayer"
 
             float4 frag (v2f i) : SV_Target
             {
-                /*   
-                float4 stroke = tex2D(_MainTex, i.uv);
-                float4 canvas = tex2D(_CanvasTex, i.uv);
-                float addedAlpha= stroke.a + canvas.a;
-                
-                //where there is no stroke (stroke.a is 0), set addedAlpha to 0 to avoid affecting the canvas
-                addedAlpha = lerp(0, addedAlpha, step(0.001, stroke.a));
-                float finalAlpha = min(addedAlpha, _Opacity);
-    
 
-                return float4(_Color.rgb, finalAlpha);*/
+                /*
                 float4 stroke = tex2D(_MainTex, i.uv);
                 // Cap the stroke's strength, but do NOT add the canvas here.
                 float finalAlpha = min(stroke.a, _Opacity);
@@ -56,6 +48,21 @@ Shader "Painting/InkLayer"
                 // If stroke.a is 0, finalAlpha is 0. 
                 // The hardware blender will naturally ignore the canvas where alpha is 0!
                 return float4(stroke.rgb, finalAlpha);
+                */
+                float4 stroke = tex2D(_MainTex, i.uv);
+                
+                // 2. CAP THE ALPHA
+                float finalAlpha = min(stroke.a, _Opacity);
+                
+                // 3. SCALE THE RGB (The Magic Fix)
+                // Calculate the ratio between the new capped alpha and the original alpha.
+                // We use max() to prevent a mathematical Divide-By-Zero error on empty pixels.
+                float alphaRatio = finalAlpha / max(stroke.a, 0.0001); 
+                
+                // Scale the premultiplied RGB down so it matches the new capped alpha.
+                float3 finalRGB = stroke.rgb * alphaRatio; 
+
+                return float4(finalRGB, finalAlpha);
 
 
             }

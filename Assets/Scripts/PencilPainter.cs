@@ -5,48 +5,87 @@ public class PencilPainter : MonoBehaviour
 {
     private Vector2 lastUV;
     private bool isDrawing = false;
-    public enum DragState { None, Clicked, Dragging }
+    public enum DragState { None, Clicked, Dragging, Released, Paused }
     private DragState dragState = DragState.None;
+
+
+    // --- PAUSE DETECTION VARIABLES ---
+    private float stationaryTimer = 0f;
+    private bool isStationaryPaused = false;
+    private const float PAUSE_THRESHOLD = 0.15f; // 50ms (Just enough to bypass hardware polling stutter)
 
     [SerializeField]
     private Brush brush;
     [SerializeField]
     private InkLayer inkLayer;
+    [SerializeField]
+    private Camera cam;
 
     void Update() {
         //test();
         HandleInputs();
     }
 
-    // Handle mouse input and drawing logic
     private void HandleInputs() {
         if (Input.GetMouseButton(0)) {
             dragState = dragState == DragState.None ? DragState.Clicked : DragState.Dragging;
+
             if (GetHitUV(out Vector2 currentUV)) {
                 if (!isDrawing) {
+                    dragState = DragState.Clicked;
                     lastUV = currentUV;
                     isDrawing = true;
+                    stationaryTimer = 0f;
+                    isStationaryPaused = false;
                 }
 
-                brush.UseBrush(lastUV, currentUV, dragState);
+                // 1. Check if the mouse is perfectly still
+                if (currentUV == lastUV) {
+                    if (dragState == DragState.Dragging) {
+                        stationaryTimer += Time.deltaTime;
 
+                        if (stationaryTimer >= PAUSE_THRESHOLD && !isStationaryPaused) {
 
+                            // THE FIX: Just send Paused! 
+                            // This drops the silent anchor but preserves the distance.
+                            brush.UseBrush(lastUV, lastUV, DragState.Paused);
+                            isStationaryPaused = true;
+                        }
+                    }
+                }
+                else {
+                    // The mouse is moving! Reset the pause state.
+                    stationaryTimer = 0f;
+                    isStationaryPaused = false;
+                }
+
+                // 2. ALWAYS pass the input to the brush!
+                if (!isStationaryPaused || dragState == DragState.Clicked) {
+                    brush.UseBrush(lastUV, currentUV, dragState);
+                }
 
                 lastUV = currentUV;
-
             }
             else {
-                isDrawing = false;
+                if (isDrawing) {
+                    brush.UseBrush(lastUV, lastUV, DragState.Released);
+                    isDrawing = false;
+                }
             }
         }
-        else if(Input.GetMouseButtonUp(0)) {
+        else if (Input.GetMouseButtonUp(0)) {
             if (dragState != DragState.None) {
-                inkLayer.ApplyInkToCanvas();
+                if (isDrawing) {
+                    brush.UseBrush(lastUV, lastUV, DragState.Released);
+                }
 
+                inkLayer.ApplyInkToCanvas();
                 dragState = DragState.None;
             }
-            dragState = DragState.None;
             isDrawing = false;
+        }
+        else if (Input.GetMouseButton(1)) {
+            cam.transform.position = Vector3.Lerp(cam.transform.position, cam.ScreenToWorldPoint(new Vector3(Input.mousePosition.x, Input.mousePosition.y, cam.nearClipPlane)), Time.deltaTime * 5f);
         }
     }
 

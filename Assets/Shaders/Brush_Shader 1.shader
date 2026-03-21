@@ -1,4 +1,4 @@
-Shader "Painting/SimpleBrush"
+Shader "Painting/SimpleBrushNoTexture"
 {
     Properties
     {
@@ -45,9 +45,9 @@ Shader "Painting/SimpleBrush"
                 return o;
             }
 
-            float4  frag (v2f i) : SV_Target
+            float4 frag (v2f i) : SV_Target
             {
-// 1. Find the exact center of the UV coordinates
+                // 1. Find the exact center of the UV coordinates
                 float2 center = float2(0.5, 0.5);
                 
                 // 2. Calculate the distance from the pixel to the center

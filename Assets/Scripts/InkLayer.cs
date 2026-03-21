@@ -10,7 +10,7 @@ public class InkLayer : MonoBehaviour
 
     public CanvasManager canvas;
 
-    private Color inkLayerColor = new Vector4(1, 1, 1, 0);
+    private Color inkLayerColor = new Vector4(0, 0, 0, 0);
 
     private void Start() {
         canvasRT = canvas.GetCanvasRT();
