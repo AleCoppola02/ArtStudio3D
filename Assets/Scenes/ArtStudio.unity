@@ -921,7 +921,6 @@ MonoBehaviour:
   - {fileID: 11400000, guid: a5139dc25b336954984eef7a5a5959c4, type: 2}
   - {fileID: 11400000, guid: 69daf92a0d624cf47a691bf5feb5adfc, type: 2}
   - {fileID: 11400000, guid: 064be113431753144b0a746e9c87f244, type: 2}
-  - {fileID: 11400000, guid: 933032854bbd1a0448872e32f6d7f437, type: 2}
 --- !u!114 &258574485
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2665,6 +2664,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Canvas
   canvasRT: {fileID: 8400000, guid: 09a910ce296790f47a2f24203af30e23, type: 2}
+  tileSize: 256
 --- !u!1 &1017258109
 GameObject:
   m_ObjectHideFlags: 0

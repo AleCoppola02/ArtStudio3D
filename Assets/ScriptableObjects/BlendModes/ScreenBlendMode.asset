@@ -14,6 +14,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BlendModeConfig
   blendModeName: Screen
   colorSourceFactor: 1
-  colorDestinationFactor: 10
-  alphaSourceFactor: 10
-  alphaDestinationFactor: 10
+  colorDestinationFactor: 6
+  alphaSourceFactor: 1
+  alphaDestinationFactor: 6
