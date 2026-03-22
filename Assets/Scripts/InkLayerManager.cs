@@ -56,6 +56,7 @@ public class InkLayerManager : MonoBehaviour
     public void SetBlendMode(BlendModeConfig config) {
         if (config != null) {
             config.SetBlendMode(inkLayerMaterial);
+            Debug.Log($"Blend mode set to {config.blendModeName}");
         }
     }
 

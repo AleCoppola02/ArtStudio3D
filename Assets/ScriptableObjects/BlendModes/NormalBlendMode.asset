@@ -13,5 +13,7 @@ MonoBehaviour:
   m_Name: NormalBlendMode
   m_EditorClassIdentifier: Assembly-CSharp::BlendModeConfig
   blendModeName: Normal
-  sourceFactor: 1
-  destinationFactor: 10
+  colorSourceFactor: 1
+  colorDestinationFactor: 10
+  alphaSourceFactor: 1
+  alphaDestinationFactor: 10

@@ -13,5 +13,7 @@ MonoBehaviour:
   m_Name: MultiplyBlendMode
   m_EditorClassIdentifier: Assembly-CSharp::BlendModeConfig
   blendModeName: Multiply
-  sourceFactor: 2
-  destinationFactor: 10
+  colorSourceFactor: 2
+  colorDestinationFactor: 10
+  alphaSourceFactor: 2
+  alphaDestinationFactor: 10

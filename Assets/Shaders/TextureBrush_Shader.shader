@@ -7,8 +7,10 @@ Shader "Painting/TextureBrush"
         _Flow ("Flow", Range(0,1)) = 0.1
         _Softness ("Edge Softness", Range(0.001, 1.0)) = 0.1
         // Expose Source and Destination Blend Modes to the inspector/code
-        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Source Blend", Float) = 1 // One
-        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination Blend", Float) = 10 // OneMinusSrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendColor ("Source Blend Color", Float) = 5 // SrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlendColor ("Destination Blend Color", Float) = 10 // OneMinusSrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendAlpha ("Source Blend Alpha", Float) = 1 // One
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlendAlpha ("Destination Blend Alpha", Float) = 10 // OneMinusSrcAlpha
     }
     SubShader
     {
@@ -21,7 +23,7 @@ Shader "Painting/TextureBrush"
         Cull Back
 
 
-        Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha
+        Blend [_SrcBlendColor] [_DstBlendColor], [_SrcBlendAlpha] [_DstBlendAlpha]
 
         Pass
         {
@@ -73,10 +75,8 @@ Shader "Painting/TextureBrush"
                 // In between, it creates a perfectly smooth gradient.
                 float shape = smoothstep(radius, radius - edgeBlur, dist);
 
-                // 7. Apply your Flow and Premultiplied Alpha math
                 float alpha = _Flow * shape; 
 
-                // Return the purely premultiplied output
                 return float4(_Color.rgb, alpha);
             }
             

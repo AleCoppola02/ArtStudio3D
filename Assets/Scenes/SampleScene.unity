@@ -918,10 +918,9 @@ MonoBehaviour:
   dropdown: {fileID: 258574485}
   inkLayer: {fileID: 1091343047}
   availableModes:
+  - {fileID: 11400000, guid: a5139dc25b336954984eef7a5a5959c4, type: 2}
   - {fileID: 11400000, guid: 69daf92a0d624cf47a691bf5feb5adfc, type: 2}
   - {fileID: 11400000, guid: 064be113431753144b0a746e9c87f244, type: 2}
-  - {fileID: 11400000, guid: 0cf7b3af651c789468952eb292d89c3c, type: 2}
-  - {fileID: 11400000, guid: a5139dc25b336954984eef7a5a5959c4, type: 2}
   - {fileID: 11400000, guid: 933032854bbd1a0448872e32f6d7f437, type: 2}
 --- !u!114 &258574485
 MonoBehaviour:

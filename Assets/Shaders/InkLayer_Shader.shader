@@ -5,8 +5,11 @@ Shader "Painting/InkLayer"
         _MainTex ("InkLayer", 2D) = "white" {}
         _CanvasTex("Canvas Texture", 2D) = "white" {}
         _Opacity ("Opacity", Range(0,1)) = 0.5
-        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Source Blend", Float) = 1 // One
-        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination Blend", Float) = 10 // OneMinusSrcAlpha
+        // Expose Source and Destination Blend Modes to the inspector/code
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendColor ("Source Blend Color", Float) = 5 // SrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlendColor ("Destination Blend Color", Float) = 10 // OneMinusSrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendAlpha ("Source Blend Alpha", Float) = 5 // SrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlendAlpha ("Destination Blend Alpha", Float) = 10 // OneMinusSrcAlpha
     }
     SubShader
     {
@@ -14,8 +17,8 @@ Shader "Painting/InkLayer"
         // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
-        Blend SrcAlpha OneMinusSrcAlpha
-        //Blend SrcAlpha OneMinusSrcAlpha
+        Blend [_SrcBlendColor] [_DstBlendColor], [_SrcBlendAlpha] [_DstBlendAlpha]
+
         Pass
         {
             CGPROGRAM
@@ -47,14 +50,18 @@ Shader "Painting/InkLayer"
                 // The hardware blender already multiplied the RGB by the Alpha when the brush stamped.
                 // We divide it back out to restore the pure, original brush color.
                 // (Using max() prevents a mathematical Divide-By-Zero error on empty pixels)
+                float strokeAlpha = stroke.a * _Opacity; // This is the most straightforward way to apply opacity, but it can cause issues with blending if the stroke alpha is already low.
                 float3 straightRGB = stroke.rgb / max(stroke.a, 0.0001);
     
                 // 2. APPLY LAYER OPACITY
                 // Cap the alpha based on your slider
-                float finalAlpha = min(stroke.a, _Opacity);
-    
+                
+                float finalAlpha = min(strokeAlpha, _Opacity);
+                
+                // We multiply the pure color by the new opacity-capped alpha.
+                 float3 premultipliedRGB = straightRGB * finalAlpha;
                 // 3. OUTPUT STRAIGHT ALPHA
-                return float4(straightRGB, finalAlpha);
+                return float4(premultipliedRGB, finalAlpha);
             }
             ENDCG
         }
