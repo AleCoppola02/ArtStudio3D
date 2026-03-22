@@ -7,7 +7,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using static PencilPainter;
 
-public class Brush : MonoBehaviour
+public class BrushManager : MonoBehaviour
 {
 
 
@@ -33,7 +33,7 @@ public class Brush : MonoBehaviour
 
     private float distanceSinceLastDraw = 0f;
     private float brushSpacing;
-    public InkLayer inkLayer;
+    public InkLayerManager inkLayer;
     private RenderTexture inkLayerRT;
 
     public CanvasManager canvas;

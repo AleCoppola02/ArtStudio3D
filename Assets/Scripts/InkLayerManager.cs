@@ -1,7 +1,10 @@
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
-public class InkLayer : MonoBehaviour
+public class InkLayerManager : MonoBehaviour
 {
+
     public Material inkLayerMaterial;
     [Range(0, 1)] public float opacity = 0.5f;
     public RenderTexture inkLayerRT;
@@ -48,6 +51,12 @@ public class InkLayer : MonoBehaviour
         inkLayerMaterial.SetTexture("_CanvasTex", tempRT); // Set temp as input for compositing
         Graphics.Blit(inkLayerRT, canvasRT, inkLayerMaterial); // Composite ink layer onto canvas using inkLayerMaterial
         ClearInkLayer(); // Clear ink layer for next stroke
+    }
+
+    public void SetBlendMode(BlendModeConfig config) {
+        if (config != null) {
+            config.SetBlendMode(inkLayerMaterial);
+        }
     }
 
 }

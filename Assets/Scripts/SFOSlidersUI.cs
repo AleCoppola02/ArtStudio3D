@@ -2,7 +2,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-public class SliderManager : MonoBehaviour
+public class SliderManagerUI : MonoBehaviour
 {
     [SerializeField]
     private TextMeshProUGUI opacityText;
@@ -20,9 +20,9 @@ public class SliderManager : MonoBehaviour
     private Slider flowSlider;
 
     [SerializeField]
-    private Brush brush;
+    private BrushManager brush;
     [SerializeField]
-    private InkLayer inkLayer;
+    private InkLayerManager inkLayer;
 
     // We store these locally so the sliders can update them constantly 
     // without hitting the hard drive every frame.

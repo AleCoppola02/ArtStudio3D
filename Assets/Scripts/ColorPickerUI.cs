@@ -2,11 +2,11 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class ColorPicker : MonoBehaviour, IPointerDownHandler, IDragHandler, IInitializePotentialDragHandler
+public class ColorPickerUI : MonoBehaviour, IPointerDownHandler, IDragHandler, IInitializePotentialDragHandler
 {
     public Material paletteMaterial;
     public RectTransform paletteRect;
-    public Brush brush;
+    public BrushManager brush;
     public Image hueSliderHandle;
     public Slider hueSlider;
 

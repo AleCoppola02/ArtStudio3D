@@ -5,6 +5,8 @@ Shader "Painting/InkLayer"
         _MainTex ("InkLayer", 2D) = "white" {}
         _CanvasTex("Canvas Texture", 2D) = "white" {}
         _Opacity ("Opacity", Range(0,1)) = 0.5
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Source Blend", Float) = 1 // One
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination Blend", Float) = 10 // OneMinusSrcAlpha
     }
     SubShader
     {
@@ -12,8 +14,8 @@ Shader "Painting/InkLayer"
         // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
         
-        //Blend SrcAlpha OneMinusSrcAlpha, One One
-        Blend One OneMinusSrcAlpha
+        Blend SrcAlpha OneMinusSrcAlpha
+        //Blend SrcAlpha OneMinusSrcAlpha
         Pass
         {
             CGPROGRAM
@@ -39,32 +41,20 @@ Shader "Painting/InkLayer"
 
             float4 frag (v2f i) : SV_Target
             {
-
-                /*
                 float4 stroke = tex2D(_MainTex, i.uv);
-                // Cap the stroke's strength, but do NOT add the canvas here.
+    
+                // 1. UN-PREMULTIPLY THE RGB (The Magic Straight-Alpha Fix)
+                // The hardware blender already multiplied the RGB by the Alpha when the brush stamped.
+                // We divide it back out to restore the pure, original brush color.
+                // (Using max() prevents a mathematical Divide-By-Zero error on empty pixels)
+                float3 straightRGB = stroke.rgb / max(stroke.a, 0.0001);
+    
+                // 2. APPLY LAYER OPACITY
+                // Cap the alpha based on your slider
                 float finalAlpha = min(stroke.a, _Opacity);
-                
-                // If stroke.a is 0, finalAlpha is 0. 
-                // The hardware blender will naturally ignore the canvas where alpha is 0!
-                return float4(stroke.rgb, finalAlpha);
-                */
-                float4 stroke = tex2D(_MainTex, i.uv);
-                
-                // 2. CAP THE ALPHA
-                float finalAlpha = min(stroke.a, _Opacity);
-                
-                // 3. SCALE THE RGB (The Magic Fix)
-                // Calculate the ratio between the new capped alpha and the original alpha.
-                // We use max() to prevent a mathematical Divide-By-Zero error on empty pixels.
-                float alphaRatio = finalAlpha / max(stroke.a, 0.0001); 
-                
-                // Scale the premultiplied RGB down so it matches the new capped alpha.
-                float3 finalRGB = stroke.rgb * alphaRatio; 
-
-                return float4(finalRGB, finalAlpha);
-
-
+    
+                // 3. OUTPUT STRAIGHT ALPHA
+                return float4(straightRGB, finalAlpha);
             }
             ENDCG
         }

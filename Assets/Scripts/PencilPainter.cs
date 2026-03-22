@@ -15,9 +15,9 @@ public class PencilPainter : MonoBehaviour
     private const float PAUSE_THRESHOLD = 0.15f; // 50ms (Just enough to bypass hardware polling stutter)
 
     [SerializeField]
-    private Brush brush;
+    private BrushManager brush;
     [SerializeField]
-    private InkLayer inkLayer;
+    private InkLayerManager inkLayer;
     [SerializeField]
     private Camera cam;
 

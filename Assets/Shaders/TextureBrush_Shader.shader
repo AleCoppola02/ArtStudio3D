@@ -1,4 +1,4 @@
-Shader "Painting/SimpleBrushNoTexture"
+Shader "Painting/TextureBrush"
 {
     Properties
     {
@@ -6,6 +6,9 @@ Shader "Painting/SimpleBrushNoTexture"
         _Color ("Brush Color", Color) = (0,0,0,1)
         _Flow ("Flow", Range(0,1)) = 0.1
         _Softness ("Edge Softness", Range(0.001, 1.0)) = 0.1
+        // Expose Source and Destination Blend Modes to the inspector/code
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Source Blend", Float) = 1 // One
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination Blend", Float) = 10 // OneMinusSrcAlpha
     }
     SubShader
     {
@@ -18,8 +21,7 @@ Shader "Painting/SimpleBrushNoTexture"
         Cull Back
 
 
-        //Blend One Zero, One One
-        Blend One OneMinusSrcAlpha
+        Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha
 
         Pass
         {
@@ -45,7 +47,7 @@ Shader "Painting/SimpleBrushNoTexture"
                 return o;
             }
 
-            float4 frag (v2f i) : SV_Target
+            float4  frag (v2f i) : SV_Target
             {
                 // 1. Find the exact center of the UV coordinates
                 float2 center = float2(0.5, 0.5);
@@ -75,10 +77,11 @@ Shader "Painting/SimpleBrushNoTexture"
                 float alpha = _Flow * shape; 
 
                 // Return the purely premultiplied output
-                return float4(_Color.rgb * alpha, alpha);
+                return float4(_Color.rgb, alpha);
             }
             
             ENDCG
         }
     }
 }
+
