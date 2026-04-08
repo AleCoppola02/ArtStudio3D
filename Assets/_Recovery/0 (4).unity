@@ -563,9 +563,6 @@ MonoBehaviour:
   brush: {fileID: 1814169578}
   inkLayer: {fileID: 1091343047}
   cam: {fileID: 330585545}
-  zoomSpeed: 3
-  minZoom: 0.00001
-  maxZoom: 20
 --- !u!4 &121691389
 Transform:
   m_ObjectHideFlags: 0

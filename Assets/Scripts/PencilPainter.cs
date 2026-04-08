@@ -7,8 +7,7 @@ public class PencilPainter : MonoBehaviour
     private bool isDrawing = false;
     public enum DragState { None, Clicked, Dragging, Released, Paused }
     private DragState dragState = DragState.None;
-
-
+    private Vector3 previousMousePosition;
     // --- PAUSE DETECTION VARIABLES ---
     private float stationaryTimer = 0f;
     private bool isStationaryPaused = false;
@@ -21,12 +20,19 @@ public class PencilPainter : MonoBehaviour
     [SerializeField]
     private Camera cam;
 
+    [Header("Zoom Settings")]
+    public float zoomSpeed = 3f;
+    public float minZoom = 0.01f;
+    public float maxZoom = 20f;
+
     void Update() {
         //test();
         HandleInputs();
     }
 
     private void HandleInputs() {
+
+        //left click 
         if (Input.GetMouseButton(0)) {
             dragState = dragState == DragState.None ? DragState.Clicked : DragState.Dragging;
 
@@ -84,11 +90,62 @@ public class PencilPainter : MonoBehaviour
             }
             isDrawing = false;
         }
-        else if (Input.GetMouseButton(1)) {
-            cam.transform.position = Vector3.Lerp(cam.transform.position, cam.ScreenToWorldPoint(new Vector3(Input.mousePosition.x, Input.mousePosition.y, cam.nearClipPlane)), Time.deltaTime * 5f);
+
+        // 1. GetMouseButtonDown(0) is true ONLY on the first frame the left click is pressed.
+        // We use this to lock in the starting position so the camera doesn't jump.
+        // (Use 1 for right-click, 2 for middle-click).
+        if (Input.GetMouseButtonDown(2)) {
+            previousMousePosition = Input.mousePosition;
+        }
+
+        // 2. GetMouseButton(0) is true as long as the button is HELD down.
+        if (Input.GetMouseButton(2)) {
+            Vector3 currentMousePosition = Input.mousePosition;
+
+            // Calculate how many pixels the mouse moved
+            Vector3 mouseDelta = currentMousePosition - previousMousePosition;
+
+            // Calculate the world-to-pixel ratio based on current zoom
+            float unitsPerPixel = (2f * cam.orthographicSize) / Screen.height;
+
+            // Convert the pixel delta to world units (ignoring Z axis)
+            Vector3 worldDelta = new Vector3(mouseDelta.x, mouseDelta.y, 0f) * unitsPerPixel;
+
+            // Move the camera in the opposite direction
+            cam.transform.position -= worldDelta;
+
+            // Update the previous position for the next frame
+            previousMousePosition = currentMousePosition;
+        }
+
+        // Input.GetAxis("Mouse ScrollWheel") returns positive when scrolling up, negative when down.
+        float scrollDelta = Input.GetAxis("Mouse ScrollWheel");
+
+        if (Mathf.Abs(scrollDelta) > 0f) {
+            // 1. Get world position under the mouse BEFORE the zoom
+            // ScreenToWorldPoint translates screen pixels to world coordinates based on current zoom
+            Vector3 mouseWorldPosBeforeZoom = cam.ScreenToWorldPoint(Input.mousePosition);
+
+            // 2. Adjust the zoom level
+            // We subtract because scrolling up (positive) should zoom IN (smaller orthographic size)
+            cam.orthographicSize -= cam.orthographicSize * scrollDelta * zoomSpeed;
+
+            // Clamp it so we don't invert the camera or zoom out to infinity
+            cam.orthographicSize = Mathf.Clamp(cam.orthographicSize, minZoom, maxZoom);
+
+            // 3. Get the new world position under the mouse AFTER the zoom
+            Vector3 mouseWorldPosAfterZoom = cam.ScreenToWorldPoint(Input.mousePosition);
+
+            // 4. Calculate how much the world "slipped" away from the cursor
+            Vector3 difference = mouseWorldPosBeforeZoom - mouseWorldPosAfterZoom;
+
+            // 5. Shift the camera by that difference to keep the cursor anchored
+            // We ensure Z stays at 0 so we don't accidentally push the camera forward/backward
+            cam.transform.position += new Vector3(difference.x, difference.y, 0f);
         }
     }
 
+    
     bool GetHitUV(out Vector2 uv) {
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         if (Physics.Raycast(ray, out RaycastHit hit)) {
