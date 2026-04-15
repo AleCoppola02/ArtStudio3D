@@ -19,22 +19,12 @@ public class InkLayerManager : MonoBehaviour
         canvasRT = canvas.GetCanvasRT();
         ClearInkLayer();
         inkLayerMaterial.SetTexture("_CanvasTex", canvasRT);
-        createTempRT();
     }
 
     public void ClearInkLayer() {
         RenderTexture.active = inkLayerRT;
         GL.Clear(true, true, inkLayerColor);
         RenderTexture.active = null;
-    }
-
-    private void createTempRT() {
-        RenderTextureDescriptor desc = canvasRT.descriptor;
-        tempRT = new RenderTexture(desc);
-        tempRT.filterMode = canvasRT.filterMode;
-        tempRT.wrapMode = canvasRT.wrapMode;
-        tempRT.anisoLevel = canvasRT.anisoLevel;
-        tempRT.Create();
     }
 
     public void SetOpacity(float opacity) {

@@ -2667,7 +2667,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Canvas
   canvasRT: {fileID: 8400000, guid: 09a910ce296790f47a2f24203af30e23, type: 2}
-  tileSize: 256
 --- !u!1 &1017258109
 GameObject:
   m_ObjectHideFlags: 0
