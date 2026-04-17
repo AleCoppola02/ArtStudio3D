@@ -3,7 +3,16 @@ using UnityEngine;
 
 public class PencilPainter : MonoBehaviour
 {
-    private Vector2 lastUV;
+
+    // --- CHANGED: We now track World Space instead of UVs ---
+    private Vector2 lastWorldPos;
+    //private Vector2 lastUV;
+
+    // Define the mathematical plane of our infinite canvas.
+    // Vector3.forward means the plane is facing us (normal is along the Z axis).
+    // Vector3.zero means the plane sits at the world origin (Z = 0).
+    Plane canvasPlane = new Plane(Vector3.forward, Vector3.zero);
+
     private bool isDrawing = false;
     public enum DragState { None, Clicked, Dragging, Released, Paused }
     private DragState dragState = DragState.None;
@@ -26,11 +35,12 @@ public class PencilPainter : MonoBehaviour
     public float maxZoom = 20f;
 
     void Update() {
-        //test();
-        HandleInputs();
+        HandleLeftClick(); 
+        HandleMouseWheel();
     }
 
-    private void HandleInputs() {
+    // Handles drawing with the left mouse button, including click, drag, release, and pause states.
+    /*private void HandleLeftClick() {
 
         //left click 
         if (Input.GetMouseButton(0)) {
@@ -90,15 +100,91 @@ public class PencilPainter : MonoBehaviour
             }
             isDrawing = false;
         }
+    }*/
 
-        // 1. GetMouseButtonDown(0) is true ONLY on the first frame the left click is pressed.
+    private void HandleLeftClick() {
+        // 1. Get the continuous World Position of the cursor right now
+        Vector2 currentWorldPos = GetMouseWorldPosition();
+
+        // 2. Left click is HELD DOWN
+        if (Input.GetMouseButton(0)) {
+            dragState = dragState == DragState.None ? DragState.Clicked : DragState.Dragging;
+
+            if (!isDrawing) {
+                // --- FIRST CLICK (Start Stroke) ---
+                dragState = DragState.Clicked;
+                lastWorldPos = currentWorldPos;
+                isDrawing = true;
+
+                brush.StartStroke(currentWorldPos);
+
+                // Reset pause detection
+                previousMousePosition = Input.mousePosition;
+                stationaryTimer = 0f;
+                isStationaryPaused = false;
+            }
+            else {
+                // --- DRAGGING (Continue Stroke) ---
+
+                // Hardware Pause Detection (We can keep this using screen pixels, 
+                // because hesitation is based on physical hand movement)
+                if (stationaryTimer >= PAUSE_THRESHOLD) {
+                    if (!isStationaryPaused) {
+                        // Just triggered the pause! Tell the brush manager to break the spline.
+                        brush.PauseStroke(currentWorldPos);
+                    }
+                    isStationaryPaused = true;
+                    dragState = DragState.Paused;
+                }
+                if (Vector3.Distance(Input.mousePosition, previousMousePosition) < 0.1f) {
+                    stationaryTimer += Time.deltaTime;
+                    if (stationaryTimer >= PAUSE_THRESHOLD) {
+                        isStationaryPaused = true;
+                        dragState = DragState.Paused;
+                    }
+                }
+                else {
+                    stationaryTimer = 0f;
+                    isStationaryPaused = false;
+                    dragState = DragState.Dragging;
+                }
+                previousMousePosition = Input.mousePosition;
+
+                // Add points to the stroke if we moved enough in WORLD SPACE
+                if (!isStationaryPaused && Vector2.Distance(lastWorldPos, currentWorldPos) > brush.spacingFactor) {
+                    brush.AddPointToStroke(currentWorldPos);
+                    lastWorldPos = currentWorldPos;
+                }
+            }
+        }
+        // 3. Left click is RELEASED
+        else if (Input.GetMouseButtonUp(0) && isDrawing) {
+            dragState = DragState.Released;
+            isDrawing = false;
+            brush.EndStroke();
+
+            // Reset pause state
+            stationaryTimer = 0f;
+            isStationaryPaused = false;
+        }
+        // 4. No interactions
+        else if (!Input.GetMouseButton(0)) {
+            dragState = DragState.None;
+        }
+
+
+    }
+
+    //Handle using the mousewheel to zoom and pan the camera, keeping the cursor anchored to the same world position under the mouse.
+    private void HandleMouseWheel() {
+        // 1. GetMouseButtonDown(2) is true ONLY on the first frame the left click is pressed.
         // We use this to lock in the starting position so the camera doesn't jump.
         // (Use 1 for right-click, 2 for middle-click).
         if (Input.GetMouseButtonDown(2)) {
             previousMousePosition = Input.mousePosition;
         }
 
-        // 2. GetMouseButton(0) is true as long as the button is HELD down.
+        // 2. GetMouseButton(2) is true as long as the button is HELD down.
         if (Input.GetMouseButton(2)) {
             Vector3 currentMousePosition = Input.mousePosition;
 
@@ -117,6 +203,7 @@ public class PencilPainter : MonoBehaviour
             // Update the previous position for the next frame
             previousMousePosition = currentMousePosition;
         }
+
 
         // Input.GetAxis("Mouse ScrollWheel") returns positive when scrolling up, negative when down.
         float scrollDelta = Input.GetAxis("Mouse ScrollWheel");
@@ -156,7 +243,23 @@ public class PencilPainter : MonoBehaviour
         return false;
     }
 
+    private Vector2 GetMouseWorldPosition() {
 
 
+        // 1. Create a mathematical ray from the camera through the mouse cursor
+        Ray mouseRay = cam.ScreenPointToRay(Input.mousePosition);
+
+        // 2. Calculate exactly where the ray intersects our invisible plane
+        if (canvasPlane.Raycast(mouseRay, out float distanceToPlane)) {
+            // 3. Get the exact 3D point in the world
+            Vector3 worldPos = mouseRay.GetPoint(distanceToPlane);
+
+            // Return just the X and Y
+            return new Vector2(worldPos.x, worldPos.y);
+        }
+
+        // Fallback (should theoretically never happen unless camera is looking away from the canvas)
+        return Vector2.zero;
+    }
 
 }

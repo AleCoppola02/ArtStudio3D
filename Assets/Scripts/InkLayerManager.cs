@@ -1,30 +1,44 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.UI; // REQUIRED: Lets us talk to the UI RawImage
 
 public class InkLayerManager : MonoBehaviour
 {
+    [Header("UI Connections")]
+    public RawImage previewOverlay; // Drag your new UI LivePreviewOverlay here!
 
+    [Header("Material & Settings")]
     public Material inkLayerMaterial;
     [Range(0, 1)] public float opacity = 0.5f;
-    public RenderTexture inkLayerRT;
-    private RenderTexture canvasRT;
-    private RenderTexture tempRT; // For compositing
-
-    public CanvasManager canvas;
-
+    
+    // This is now strictly managed by code, no longer assigned in the Inspector
+    private RenderTexture inkLayerRT; 
+    
     private Color inkLayerColor = new Vector4(0, 0, 0, 0);
 
-    private void Start() {
-        canvasRT = canvas.GetCanvasRT();
+    private void Awake() {
+        // 1. Create a texture that perfectly matches the current monitor resolution
+        inkLayerRT = new RenderTexture(Screen.width, Screen.height, 0, RenderTextureFormat.ARGB32);
+        
+        // Prevent blending artifacts on the UI overlay
+        inkLayerRT.filterMode = FilterMode.Point; 
+        inkLayerRT.Create();
+
+        // 2. Slap it onto the UI Raw Image
+        if (previewOverlay != null) {
+            previewOverlay.texture = inkLayerRT;
+        }
+
         ClearInkLayer();
-        inkLayerMaterial.SetTexture("_CanvasTex", canvasRT);
     }
 
     public void ClearInkLayer() {
-        RenderTexture.active = inkLayerRT;
-        GL.Clear(true, true, inkLayerColor);
-        RenderTexture.active = null;
+        if (inkLayerRT != null) {
+            RenderTexture.active = inkLayerRT;
+            GL.Clear(true, true, inkLayerColor);
+            RenderTexture.active = null;
+        }
     }
 
     public void SetOpacity(float opacity) {
@@ -36,18 +50,17 @@ public class InkLayerManager : MonoBehaviour
         return inkLayerRT;
     }
 
-    public void ApplyInkToCanvas() {
-        Graphics.Blit(canvasRT, tempRT); // Copy current canvas to temp
-        inkLayerMaterial.SetTexture("_CanvasTex", tempRT); // Set temp as input for compositing
-        Graphics.Blit(inkLayerRT, canvasRT, inkLayerMaterial); // Composite ink layer onto canvas using inkLayerMaterial
-        ClearInkLayer(); // Clear ink layer for next stroke
-    }
+    // ------------------------------------------------------------------
+    // NOTE: ApplyInkToCanvas() HAS BEEN COMPLETELY DELETED!
+    // The SVT Bake process in CanvasManager will handle saving the stroke.
+    // ------------------------------------------------------------------
 
+    // Fully preserved for the SVT Bake process
     public void SetBlendMode(BlendModeConfig config) {
         if (config != null) {
+            // We use YOUR ScriptableObject's built-in method!
             config.SetBlendMode(inkLayerMaterial);
             Debug.Log($"Blend mode set to {config.blendModeName}");
         }
     }
-
 }

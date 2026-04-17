@@ -131,4 +131,15 @@ public class BackingStore
             indirectionTables[i].ApplyChanges();
         }
     }
+
+    // Helper so the CanvasManager can find where a tile lives in VRAM
+    public Vector2Int? GetPhysicalSlot(int x, int y, int zoomLevel) {
+        Vector3Int address = new Vector3Int(x, y, zoomLevel);
+
+        // If the tile exists and is currently loaded in the GPU, return its slot!
+        if (tileDatabase.TryGetValue(address, out TileState state) && state.IsLoaded) {
+            return state.PhysicalSlot;
+        }
+        return null;
+    }
 }

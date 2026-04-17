@@ -358,6 +358,78 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
+--- !u!1 &63001187
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 63001188}
+  - component: {fileID: 63001190}
+  - component: {fileID: 63001189}
+  m_Layer: 5
+  m_Name: LivePreviewOverlay
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &63001188
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 63001187}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1069937482}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 1, y: 1}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &63001189
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 63001187}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1344c3c82d62a2a41a3576d8abb8e3ea, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.RawImage
+  m_Material: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Texture: {fileID: 0}
+  m_UVRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+--- !u!222 &63001190
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 63001187}
+  m_CullTransparentMesh: 1
 --- !u!1 &90671404
 GameObject:
   m_ObjectHideFlags: 0
@@ -1224,7 +1296,7 @@ Transform:
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.005, y: 0.009, z: -1.188}
+  m_LocalPosition: {x: 0, y: 0, z: -1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2666,6 +2738,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8ba5c85e56281754fb6751a6c7550d29, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Canvas
+  tileSize: 256
+  worldUnitsPerTile: 0.2
+  brushManager: {fileID: 1814169578}
+  canvasWidthInTiles: 8
+  canvasHeightInTiles: 8
+  debugAtlasRT: {fileID: 0}
   canvasRT: {fileID: 8400000, guid: 09a910ce296790f47a2f24203af30e23, type: 2}
 --- !u!1 &1017258109
 GameObject:
@@ -2798,6 +2876,7 @@ RectTransform:
   m_LocalScale: {x: 0, y: 0, z: 0}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 63001188}
   - {fileID: 803608839}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -2875,7 +2954,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1091343042}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -2952,10 +3031,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e8d3ef06d6ccad4c8b080e003f5f372, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::InkLayer
+  previewOverlay: {fileID: 63001189}
   inkLayerMaterial: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
   opacity: 0.5
-  inkLayerRT: {fileID: 8400000, guid: f689bf0776c2ea44f9ec2a550197525a, type: 2}
-  canvas: {fileID: 981973946}
 --- !u!1 &1104400898
 GameObject:
   m_ObjectHideFlags: 0
@@ -4552,9 +4630,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   brushMaterial: {fileID: 2100000, guid: 9d774e1eccd61824a90a85fa4786370b, type: 2}
   inkLayerMaterial: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
-  maxDrawsPerSecond: 3
+  brushSize: 50
   spacingFactor: 0.05
-  canvasRT: {fileID: 8400000, guid: 09a910ce296790f47a2f24203af30e23, type: 2}
+  cam: {fileID: 330585545}
   inkLayer: {fileID: 1091343047}
   canvas: {fileID: 981973946}
 --- !u!4 &1814169579
