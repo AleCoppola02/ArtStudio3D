@@ -18,7 +18,7 @@ public class IndirectionTable : System.IDisposable
         Height = heightInTiles;
 
         // 1. Create the Texture
-        TableTexture = new Texture2D(Width, Height, TextureFormat.RGBA32, false);
+        TableTexture = new Texture2D(Width, Height, TextureFormat.RGBA32, false, true);
 
         // CRITICAL: Prevent Unity from blurring our data!
         TableTexture.filterMode = FilterMode.Point;
