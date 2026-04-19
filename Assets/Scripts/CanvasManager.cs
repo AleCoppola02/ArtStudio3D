@@ -45,10 +45,25 @@ public class CanvasManager : MonoBehaviour
         scratchpadRT.Create();
 
 
-        // 2. Create tables and CPU manager
-        tables = new IndirectionTable[1];
-        tables[0] = new IndirectionTable(0, canvasWidthInTiles, canvasHeightInTiles);
-        backingStore = new BackingStore(atlas, tables);
+        // --- NEW: BUILD THE MIPMAP PYRAMID ---
+        // Calculate how many levels we need based on the canvas size.
+        // An 8x8 canvas requires 4 levels (8x8, 4x4, 2x2, 1x1).
+        int maxDim = Mathf.Max(canvasWidthInTiles, canvasHeightInTiles);
+        int numLevels = Mathf.FloorToInt(Mathf.Log(maxDim, 2)) + 1;
+
+        tables = new IndirectionTable[numLevels];
+        int currentWidth = canvasWidthInTiles;
+        int currentHeight = canvasHeightInTiles;
+
+        for (int i = 0; i < numLevels; i++) {
+            tables[i] = new IndirectionTable(i, currentWidth, currentHeight);
+
+            // Shrink the grid by 50% for the next zoom level
+            currentWidth = Mathf.Max(1, currentWidth / 2);
+            currentHeight = Mathf.Max(1, currentHeight / 2);
+        }
+
+        backingStore = new BackingStore(this, atlas, tables);
 
         // Link VRAM resources to the shader
         if (svtCanvasMaterial != null) {
@@ -82,7 +97,7 @@ public class CanvasManager : MonoBehaviour
 
         float canvasWorldWidth = canvasWidthInTiles * worldUnitsPerTile;
         float canvasWorldHeight = canvasHeightInTiles * worldUnitsPerTile;
-        float brushRadius = brushManager.brushSize / 2f;
+        float brushRadius = brushManager.GetCurrentWorldBrushSize() / 2f;
 
         // 1. FIND ALL TOUCHED TILES
         HashSet<Vector2Int> touchedTiles = new HashSet<Vector2Int>();
@@ -105,7 +120,7 @@ public class CanvasManager : MonoBehaviour
         // 2. ALLOCATE VRAM 
         foreach (Vector2Int tile in touchedTiles) {
             if (tile.x >= 0 && tile.x < canvasWidthInTiles && tile.y >= 0 && tile.y < canvasHeightInTiles) {
-                backingStore.RequestTile(tile.x, tile.y, 0);
+                backingStore.RequestTile(tile.x, tile.y, 0, true);
             }
         }
         backingStore.SyncGPU();
@@ -144,7 +159,7 @@ public class CanvasManager : MonoBehaviour
 
                     float localX = (shiftedX - tileWorldX) / worldUnitsPerTile;
                     float localY = (shiftedY - tileWorldY) / worldUnitsPerTile;
-                    float halfBrush = (brushManager.brushSize / worldUnitsPerTile) / 2f;
+                    float halfBrush = (brushManager.GetCurrentWorldBrushSize() / worldUnitsPerTile) / 2f;
 
                     GL.TexCoord2(0, 0); GL.Vertex3(localX - halfBrush, localY - halfBrush, 0);
                     GL.TexCoord2(0, 1); GL.Vertex3(localX - halfBrush, localY + halfBrush, 0);
@@ -179,6 +194,10 @@ public class CanvasManager : MonoBehaviour
 
                 GL.End();
                 GL.PopMatrix();
+
+                backingStore.MarkTileDirty(tile.x, tile.y, 0);
+
+                backingStore.QueueMipmapUpdate(tile.x, tile.y, 0);
             }
         }
 
@@ -186,108 +205,38 @@ public class CanvasManager : MonoBehaviour
         Debug.Log($"Baked {stampBuffer.Count} stamps via Scratchpad permanently into VRAM!");
     }
 
-   /* public void BakeStroke(List<Vector2> stampBuffer) {
-        if (stampBuffer.Count == 0) return;
+    public Vector2Int WorldToTileCoordinate(Vector2 worldPos, int zoomLevel = 0) {
+        // At Zoom 0, multiplier is 1. Zoom 1 = 2. Zoom 2 = 4. Zoom 3 = 8.
+        float scaleMultiplier = Mathf.Pow(2, zoomLevel);
+        float currentUnitsPerTile = worldUnitsPerTile * scaleMultiplier;
 
+        // Calculate how many tiles exist at this specific zoom level
+        int currentWidthInTiles = Mathf.Max(1, canvasWidthInTiles >> zoomLevel);
+        int currentHeightInTiles = Mathf.Max(1, canvasHeightInTiles >> zoomLevel);
+
+        // The absolute physical bounds of the canvas NEVER change
         float canvasWorldWidth = canvasWidthInTiles * worldUnitsPerTile;
         float canvasWorldHeight = canvasHeightInTiles * worldUnitsPerTile;
 
-        // The radius of our brush in world units
-        float brushRadius = brushManager.brushSize / 2f;
-
-        // 1. FIND ALL TOUCHED TILES (Considering Brush Radius!)
-        HashSet<Vector2Int> touchedTiles = new HashSet<Vector2Int>();
-
-        foreach (Vector2 point in stampBuffer) {
-            float shiftedX = point.x + (canvasWorldWidth / 2f);
-            float shiftedY = point.y + (canvasWorldHeight / 2f);
-
-            // Calculate the bounding box of the brush stamp to catch neighboring tiles
-            int minX = Mathf.FloorToInt((shiftedX - brushRadius) / worldUnitsPerTile);
-            int maxX = Mathf.FloorToInt((shiftedX + brushRadius) / worldUnitsPerTile);
-            int minY = Mathf.FloorToInt((shiftedY - brushRadius) / worldUnitsPerTile);
-            int maxY = Mathf.FloorToInt((shiftedY + brushRadius) / worldUnitsPerTile);
-
-            for (int x = minX; x <= maxX; x++) {
-                for (int y = minY; y <= maxY; y++) {
-                    touchedTiles.Add(new Vector2Int(x, y));
-                }
-            }
-        }
-
-        // 2. ALLOCATE VRAM 
-        foreach (Vector2Int tile in touchedTiles) {
-            if (tile.x >= 0 && tile.x < canvasWidthInTiles && tile.y >= 0 && tile.y < canvasHeightInTiles) {
-                backingStore.RequestTile(tile.x, tile.y, 0);
-            }
-        }
-        backingStore.SyncGPU();
-
-        // 3. RENDER WITH STRICT CLIPPING
-        RenderTexture.active = atlas.Texture;
-        brushManager.brushMaterial.SetPass(0);
-
-        foreach (Vector2Int tile in touchedTiles) {
-            // Skip tiles outside our mathematical canvas
-            if (tile.x < 0 || tile.x >= canvasWidthInTiles || tile.y < 0 || tile.y >= canvasHeightInTiles) continue;
-
-            Vector2Int? physicalSlot = backingStore.GetPhysicalSlot(tile.x, tile.y, 0);
-
-            if (physicalSlot != null) {
-                // THE MAGIC: Restrict the GPU to only draw strictly inside this specific physical tile!
-                // It is physically impossible to bleed into neighbor slots now.
-                GL.Viewport(new Rect(physicalSlot.Value.x * tileSize, physicalSlot.Value.y * tileSize, tileSize, tileSize));
-
-                GL.PushMatrix();
-                GL.LoadOrtho(); // 0.0 to 1.0 now maps perfectly to the edges of this specific tile
-                GL.Begin(GL.QUADS);
-
-                // Replay ALL stamps, mapping them relative to THIS tile
-                foreach (Vector2 point in stampBuffer) {
-                    float shiftedX = point.x + (canvasWorldWidth / 2f);
-                    float shiftedY = point.y + (canvasWorldHeight / 2f);
-
-                    // Find bottom-left corner of this specific tile
-                    float tileWorldX = tile.x * worldUnitsPerTile;
-                    float tileWorldY = tile.y * worldUnitsPerTile;
-
-                    // Map stamp to 0.0 - 1.0 inside this tile
-                    float localX = (shiftedX - tileWorldX) / worldUnitsPerTile;
-                    float localY = (shiftedY - tileWorldY) / worldUnitsPerTile;
-
-                    float halfBrush = (brushManager.brushSize / worldUnitsPerTile) / 2f;
-
-                    // Draw it! GL.Viewport will automatically chop off anything outside 0-1
-                    GL.TexCoord2(0, 0); GL.Vertex3(localX - halfBrush, localY - halfBrush, 0);
-                    GL.TexCoord2(0, 1); GL.Vertex3(localX - halfBrush, localY + halfBrush, 0);
-                    GL.TexCoord2(1, 1); GL.Vertex3(localX + halfBrush, localY + halfBrush, 0);
-                    GL.TexCoord2(1, 0); GL.Vertex3(localX + halfBrush, localY - halfBrush, 0);
-                }
-
-                GL.End();
-                GL.PopMatrix();
-            }
-        }
-
-        RenderTexture.active = null;
-        Debug.Log($"Baked {stampBuffer.Count} stamps across {touchedTiles.Count} tiles safely into VRAM!");
-    }
-
-    private Vector2Int WorldToTileCoordinate(Vector2 worldPos) {
-        // 1. Calculate the total size of the canvas in world units
-        float canvasWorldWidth = canvasWidthInTiles * worldUnitsPerTile;
-        float canvasWorldHeight = canvasHeightInTiles * worldUnitsPerTile;
-
-        // 2. Shift the math so the Unity Origin (0,0) is exactly in the middle of the canvas
         float shiftedX = worldPos.x + (canvasWorldWidth / 2f);
         float shiftedY = worldPos.y + (canvasWorldHeight / 2f);
 
-        // 3. Calculate the grid index
-        int tileX = Mathf.FloorToInt(shiftedX / worldUnitsPerTile);
-        int tileY = Mathf.FloorToInt(shiftedY / worldUnitsPerTile);
+        // Divide by our new scaled tile size
+        int tileX = Mathf.FloorToInt(shiftedX / currentUnitsPerTile);
+        int tileY = Mathf.FloorToInt(shiftedY / currentUnitsPerTile);
+
+        // Clamp using the new, smaller grid dimensions
+        tileX = Mathf.Clamp(tileX, 0, currentWidthInTiles - 1);
+        tileY = Mathf.Clamp(tileY, 0, currentHeightInTiles - 1);
 
         return new Vector2Int(tileX, tileY);
     }
-   */
+
+    private void OnApplicationQuit() {
+        if (backingStore != null) {
+            Debug.Log("Application closing. Wiping the SVT hard drive cache...");
+            backingStore.ClearAllSavedTiles();
+        }
+    }
 
 }

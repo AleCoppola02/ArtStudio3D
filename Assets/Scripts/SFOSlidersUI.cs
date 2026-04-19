@@ -67,7 +67,10 @@ public class SliderManagerUI : MonoBehaviour
     }
 
     public void SetBrushSizeUI(float size) {
+        // Pass the new size to the Brush Manager
         brush.SetBrushSize(size);
+
+        // Update the text to show a nice clean whole number
         sizeText.text = size.ToString("F0");
 
         currentSize = size;

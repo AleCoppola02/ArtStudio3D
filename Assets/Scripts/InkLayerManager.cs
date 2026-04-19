@@ -10,6 +10,8 @@ public class InkLayerManager : MonoBehaviour
 
     [Header("Material & Settings")]
     public Material inkLayerMaterial;
+    public Material previewMaterial;
+
     [Range(0, 1)] public float opacity = 0.5f;
     
     // This is now strictly managed by code, no longer assigned in the Inspector
@@ -30,6 +32,11 @@ public class InkLayerManager : MonoBehaviour
             previewOverlay.texture = inkLayerRT;
         }
 
+        // 3. Also set it on the preview material for shader access
+        if (previewMaterial != null) {
+            previewMaterial.SetTexture("_MainTex", inkLayerRT);
+        }
+
         ClearInkLayer();
     }
 
@@ -44,6 +51,7 @@ public class InkLayerManager : MonoBehaviour
     public void SetOpacity(float opacity) {
         this.opacity = opacity;
         inkLayerMaterial.SetFloat("_Opacity", opacity);
+        if (previewMaterial != null) previewMaterial.SetFloat("_Opacity", opacity);
     }
 
     public RenderTexture GetInkLayerRT() {
@@ -61,6 +69,7 @@ public class InkLayerManager : MonoBehaviour
             // We use YOUR ScriptableObject's built-in method!
             config.SetBlendMode(inkLayerMaterial);
             Debug.Log($"Blend mode set to {config.blendModeName}");
+            if (previewMaterial != null) config.SetBlendMode(previewMaterial);
         }
     }
 }

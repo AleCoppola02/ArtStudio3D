@@ -4,14 +4,19 @@ using static UnityEngine.InputSystem.LowLevel.InputStateHistory;
 
 public class BrushManager : MonoBehaviour
 {
+    //Brush Size Mode allows us to choose whether the brush size is in World Space (e.g. 50 units) or Screen Space (e.g. 50 pixels). This is a common feature in digital painting software.
+    public enum BrushSizeMode { WorldSpace, ScreenSpace }
+    [Header("Brush Settings")]
+    public BrushSizeMode sizeMode = BrushSizeMode.ScreenSpace; // Default to Screen Space
+
     private List<Vector2> pointBuffer = new List<Vector2>(); // Stores our spline points
     private List<Vector2> stampBuffer = new List<Vector2>(); // Stores every single brush stamp
 
     public Material brushMaterial;
     public Material inkLayerMaterial;
 
-    [Header("Brush Settings")]
-    [Range(1, 400)] public float brushSize = 50f; // This is now in WORLD UNITS
+    [Range(1, 1000)]
+    public float brushSizeUI = 50f;
     private Color brushColor = Color.black;
     [Range(0.1f, 1f)] private float flow = 1f;
 
@@ -25,11 +30,9 @@ public class BrushManager : MonoBehaviour
     public CanvasManager canvas;
 
     private float distanceSinceLastDraw = 0f;
-    private float brushSpacing;
     private RenderTexture inkLayerRT;
 
     void Start() {
-        SetBrushSize(brushSize);
         SetBrushColor(brushColor);
         SetBrushFlow(flow);
 
@@ -64,11 +67,14 @@ public class BrushManager : MonoBehaviour
             Vector2 p2 = pointBuffer[pointBuffer.Count - 2];
             Vector2 p3 = pointBuffer[pointBuffer.Count - 1];
 
+
+            float currentSpacing = GetCurrentBrushSpacing();
+
             // 1. Calculate how many segments we need to check based on distance
             float distance = Vector2.Distance(p1, p2);
             //segments are how many times we will interpolate between p1 and p2.
             //We multiply by 2 because we want to be extra sure we don't miss any spots when the brush is moving quickly. This is a common technique in line rendering algorithms.
-            int segments = Mathf.CeilToInt(distance / brushSpacing) * 2; 
+            int segments = Mathf.CeilToInt(distance / currentSpacing) * 2;
             segments = Mathf.Max(segments, 1);
 
             // 2. Walk along the mathematical curve
@@ -80,7 +86,7 @@ public class BrushManager : MonoBehaviour
                 distanceSinceLastDraw += Vector2.Distance(p1, interpolatedWorldPos);
 
                 // 4. Drop a stamp if we've traveled far enough!
-                if (distanceSinceLastDraw >= brushSpacing) {
+                if (distanceSinceLastDraw >= currentSpacing) {
                     DrawStampAtWorldPos(interpolatedWorldPos);
                     distanceSinceLastDraw = 0f;
                 }
@@ -147,12 +153,14 @@ public class BrushManager : MonoBehaviour
         GL.Begin(GL.QUADS);
 
         // --- DYNAMIC ZOOM SCALING ---
-        // We must calculate how big the brush looks on the screen based on the camera zoom.
         float camWorldHeight = cam.orthographicSize * 2f;
         float camWorldWidth = camWorldHeight * cam.aspect;
 
-        float halfX = (brushSize / camWorldWidth) / 2f;
-        float halfY = (brushSize / camWorldHeight) / 2f;
+        // ---Ask the manager how big the brush physically is right now ---
+        float actualWorldSize = GetCurrentWorldBrushSize();
+
+        float halfX = (actualWorldSize / camWorldWidth) / 2f;
+        float halfY = (actualWorldSize / camWorldHeight) / 2f;
 
         // Draw the square using the Viewport Coordinates
         GL.TexCoord2(0, 0); GL.Vertex3(viewportUV.x - halfX, viewportUV.y - halfY, 0);
@@ -174,14 +182,39 @@ public class BrushManager : MonoBehaviour
         brushMaterial.SetColor("_Color", brushColor);
     }
 
-    public void SetBrushSize(float brushSize) {
-        this.brushSize = brushSize;
-        brushSpacing = brushSize * spacingFactor; // Spacing is now in World Units
-    }
+
 
     public void SetBrushFlow(float flow) {
         this.flow = flow;
         brushMaterial.SetFloat("_Flow", flow);
+    }
+
+    public void SetBrushSize(float newUISize) {
+        // Update the new UI variable instead of the old one
+        brushSizeUI = newUISize;
+
+        // Notice we COMPLETELY REMOVED the old brushSpacing calculation here!
+        // Spacing is now calculated dynamically in GetCurrentBrushSpacing()
+    }
+
+    // Calculates the ACTUAL size of the brush in 3D World Units at this exact moment
+    public float GetCurrentWorldBrushSize() {
+        if (sizeMode == BrushSizeMode.WorldSpace) {
+            // UI 100 = 1 World Unit. (Tweak the 100f if you want a different baseline scale!)
+            return brushSizeUI / 100f;
+        }
+        else {
+            // Screen Space: UI value represents Screen Pixels
+            float screenFraction = brushSizeUI / Screen.height;
+            float camWorldHeight = 2f * cam.orthographicSize;
+            return screenFraction * camWorldHeight;
+        }
+    }
+
+    // Since brush size can change dynamically when zooming (in Screen Space mode), 
+    // we also need to calculate spacing dynamically!
+    public float GetCurrentBrushSpacing() {
+        return GetCurrentWorldBrushSize() * spacingFactor;
     }
 
     private Vector2 GetCatmullRomPosition(float t, Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3) {

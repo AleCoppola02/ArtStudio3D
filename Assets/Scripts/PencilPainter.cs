@@ -4,6 +4,8 @@ using UnityEngine;
 public class PencilPainter : MonoBehaviour
 {
 
+    [SerializeField] private SliderManagerUI sliderManagerUI;
+
     // --- CHANGED: We now track World Space instead of UVs ---
     private Vector2 lastWorldPos;
     //private Vector2 lastUV;
@@ -35,8 +37,11 @@ public class PencilPainter : MonoBehaviour
     public float maxZoom = 20f;
 
     void Update() {
-        HandleLeftClick(); 
-        HandleMouseWheel();
+        HandleLeftClick();
+        HandleMouseWheel(); // Your existing zoom logic
+
+        // --- NEW: Dynamic Brush Resizing via Hotkeys ---
+        HandleBrushSizeHotkeys();
     }
 
     // Handles drawing with the left mouse button, including click, drag, release, and pause states.
@@ -260,6 +265,27 @@ public class PencilPainter : MonoBehaviour
 
         // Fallback (should theoretically never happen unless camera is looking away from the canvas)
         return Vector2.zero;
+    }
+
+    private void HandleBrushSizeHotkeys() {
+        // Standard art software shortcuts: '[' to shrink, ']' to grow
+        if (Input.GetKey(KeyCode.LeftBracket)) {
+            ChangeBrushSize(-2f); // Shrink by 2 units per frame
+        }
+        if (Input.GetKey(KeyCode.RightBracket)) {
+            ChangeBrushSize(2f);  // Grow by 2 units per frame
+        }
+    }
+
+    private void ChangeBrushSize(float amount) {
+        // Grab the current size, add the amount, and clamp it so it doesn't break
+        float currentSize = brush.brushSizeUI;
+        float newSize = Mathf.Clamp(currentSize + amount, 1f, 1000f);
+
+        // Update the brush
+        brush.SetBrushSize(newSize);
+
+        sliderManagerUI.SetBrushSizeUI(newSize);
     }
 
 }
