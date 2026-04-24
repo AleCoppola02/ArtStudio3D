@@ -35,6 +35,6 @@ Material:
     m_Floats:
     - _AtlasSlotsAcross: 16
     m_Colors:
-    - _TableSize: {r: 8, g: 8, b: 0, a: 0}
+    - _TableSize: {r: 32, g: 32, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

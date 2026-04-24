@@ -72,8 +72,14 @@ Shader "Painting/SVT_Decoder"
                 float atlasU = (slotX + localUV.x) / _AtlasSlotsAcross;
                 float atlasV = (slotY + localUV.y) / _AtlasSlotsAcross;
 
-                // 5. Grab the actual ink from VRAM!
-                return tex2D(_PhysicalAtlas, float2(atlasU, atlasV));
+                // 5. Grab the raw color and alpha from VRAM using the U and V we just calculated
+                float4 atlasColor = tex2D(_PhysicalAtlas, float2(atlasU, atlasV));
+
+                // 6. Blend the ink over a pure white paper background using the ink's Alpha channel
+                float3 finalColor = lerp(float3(1.0, 1.0, 1.0), atlasColor.rgb, atlasColor.a);
+
+                // Return the flattened, white-paper-backed image!
+                return float4(finalColor, 1.0);
             }
             ENDCG
         }

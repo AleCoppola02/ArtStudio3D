@@ -6,11 +6,26 @@ public class CameraTileRequester : MonoBehaviour
     public Camera cam;
     public CanvasManager canvas;
 
+    // 1. Our explicit lock flag
+    private bool isReady = false;
+
+    // ADD THIS: Track the zoom level so we know when it changes!
+    private int lastZoomLevel = -1;
+
+    // 2. The explicit starting gun, called by CanvasManager
+    public void Initialize() {
+        isReady = true;
+
+        // Optionally: Force the first tile request immediately upon initialization
+        // so the camera doesn't have to wait for the next Update() cycle to start loading.
+        RequestVisibleTiles();
+    }
+
     void Update() {
-        // We only want to run this if the SVT engine is actually running
-        if (canvas != null && canvas.backingStore != null) {
-            RequestVisibleTiles();
-        }
+        // 3. A much cheaper check! We just check a single boolean instead of multiple object references.
+        if (!isReady) return;
+
+        RequestVisibleTiles();
     }
 
     private void RequestVisibleTiles() {
@@ -23,12 +38,29 @@ public class CameraTileRequester : MonoBehaviour
         float camHeightInOriginalTiles = camHeight / canvas.worldUnitsPerTile;
 
         // Log2 tells us exactly when we double in size! 
-        // Example: log2(2) = 1. log2(4) = 2. log2(8) = 3.
         int desiredZoom = Mathf.FloorToInt(Mathf.Log(camHeightInOriginalTiles, 2));
 
         // Clamp it so we don't ask for a zoom level that doesn't exist
         int maxZoomAllowed = canvas.tables.Length - 1;
         int currentZoomLevel = Mathf.Clamp(desiredZoom, 0, maxZoomAllowed);
+
+        // =======================
+        // --- SHADER UPDATE ---
+        // =======================
+        // If the zoom level just changed, we MUST update the material!
+        if (currentZoomLevel != lastZoomLevel) {
+            lastZoomLevel = currentZoomLevel;
+
+            IndirectionTable currentTable = canvas.tables[currentZoomLevel];
+
+            // 1. Give the GPU the correct Indirection Table for this zoom level
+            canvas.svtCanvasMaterial.SetTexture("_IndirectionTable", currentTable.TableTexture);
+
+            // 2. Tell the Shader the new grid size so the fractional UV math doesn't explode!
+            canvas.svtCanvasMaterial.SetVector("_TableSize", new Vector4(currentTable.Width, currentTable.Height, 0, 0));
+        }
+        // ======================
+
         // ==========================================
         // 2. FIND VISIBLE TILES AT THAT ZOOM LEVEL
         // ==========================================
@@ -38,18 +70,17 @@ public class CameraTileRequester : MonoBehaviour
         float minWorldY = camPos.y - (camHeight / 2f);
         float maxWorldY = camPos.y + (camHeight / 2f);
 
-        // Notice we are passing the new currentZoomLevel here!
         Vector2Int minTile = canvas.WorldToTileCoordinate(new Vector2(minWorldX, minWorldY), currentZoomLevel);
         Vector2Int maxTile = canvas.WorldToTileCoordinate(new Vector2(maxWorldX, maxWorldY), currentZoomLevel);
 
         // Request the tiles
         for (int x = minTile.x; x <= maxTile.x; x++) {
             for (int y = minTile.y; y <= maxTile.y; y++) {
-                // Notice we are requesting the specific Zoom Level!
                 canvas.backingStore.RequestTile(x, y, currentZoomLevel);
             }
         }
 
         canvas.backingStore.SyncGPU();
+        Debug.Log("current zoom level: " + currentZoomLevel + " | requesting tiles from (" + minTile.x + "," + minTile.y + ") to (" + maxTile.x + "," + maxTile.y + ")");
     }
 }

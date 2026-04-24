@@ -3264,6 +3264,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Canvas
   tileSize: 256
   worldUnitsPerTile: 1
+  tileRequester: {fileID: 330585548}
   svtCanvasMaterial: {fileID: 2100000, guid: 2d32f37e5827beb4db446f1f23df6f90, type: 2}
   brushManager: {fileID: 1814169578}
   inkLayerManager: {fileID: 1091343047}

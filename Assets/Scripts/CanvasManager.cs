@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEditor.PackageManager.Requests;
 using UnityEngine;
 
 public class CanvasManager : MonoBehaviour
@@ -6,6 +7,9 @@ public class CanvasManager : MonoBehaviour
     [Header("SVT Settings")]
     public int tileSize = 256;
     public float worldUnitsPerTile = 1f;
+
+    [Header("References")]
+    public CameraTileRequester tileRequester;
 
     [Header("SVT Rendering")]
     public Material svtCanvasMaterial; // <--- //drag in inspector
@@ -31,6 +35,29 @@ public class CanvasManager : MonoBehaviour
     private Color canvasColor = new Vector4(1, 1, 1, 1);
 
     private void Start() {
+        // 1. Read from the bridge
+        float requestedWidth = CanvasConfig.Width;
+        float requestedHeight = CanvasConfig.Height;
+
+        // 2. Calculate the exact float dimensions in World Units
+        float exactWidthInTiles = requestedWidth / tileSize;
+        float exactHeightInTiles = requestedHeight / tileSize;
+
+        float widthInWorldUnits = exactWidthInTiles * worldUnitsPerTile;
+        float heightInWorldUnits = exactHeightInTiles * worldUnitsPerTile;
+
+        // 3. Scale the Quad correctly!
+        transform.localScale = new Vector3(widthInWorldUnits, heightInWorldUnits, 1f);
+
+        // 4. Calculate the Memory Grid (Padding the void for the Indirection Table)
+        canvasWidthInTiles = Mathf.CeilToInt(exactWidthInTiles);
+        canvasHeightInTiles = Mathf.CeilToInt(exactHeightInTiles);
+
+        // 5. Calculate Mipmap Levels
+        int maxDim = Mathf.Max(canvasWidthInTiles, canvasHeightInTiles);
+        int numMipmapLevels = Mathf.FloorToInt(Mathf.Log(maxDim, 2)) + 1;
+
+
         // 1. Create the Atlas
         atlas = new PhysicalAtlas(4096, tileSize);
         debugAtlasRT = atlas.Texture;
@@ -45,17 +72,12 @@ public class CanvasManager : MonoBehaviour
         scratchpadRT.Create();
 
 
-        // --- NEW: BUILD THE MIPMAP PYRAMID ---
-        // Calculate how many levels we need based on the canvas size.
-        // An 8x8 canvas requires 4 levels (8x8, 4x4, 2x2, 1x1).
-        int maxDim = Mathf.Max(canvasWidthInTiles, canvasHeightInTiles);
-        int numLevels = Mathf.FloorToInt(Mathf.Log(maxDim, 2)) + 1;
 
-        tables = new IndirectionTable[numLevels];
+        tables = new IndirectionTable[numMipmapLevels];
         int currentWidth = canvasWidthInTiles;
         int currentHeight = canvasHeightInTiles;
 
-        for (int i = 0; i < numLevels; i++) {
+        for (int i = 0; i < numMipmapLevels; i++) {
             tables[i] = new IndirectionTable(i, currentWidth, currentHeight);
 
             // Shrink the grid by 50% for the next zoom level
@@ -78,6 +100,12 @@ public class CanvasManager : MonoBehaviour
         // ------------------------------------
 
         ClearCanvas();
+
+        FrameCanvasPerfectly(widthInWorldUnits, heightInWorldUnits);
+
+        if (tileRequester != null) {
+            tileRequester.Initialize();
+        }
     }
 
     public RenderTexture GetCanvasRT() {
@@ -237,6 +265,20 @@ public class CanvasManager : MonoBehaviour
             Debug.Log("Application closing. Wiping the SVT hard drive cache...");
             backingStore.ClearAllSavedTiles();
         }
+    }
+
+    private void FrameCanvasPerfectly(float widthInWorldUnits, float heightInWorldUnits) {
+        Camera cam = Camera.main;
+
+        // 1. Center the camera over the quad (Assuming Quad is at 0,0,0)
+        cam.transform.position = new Vector3(0, 0, -10f);
+
+        // 2. Calculate the required Orthographic Size (which is half the vertical height)
+        float sizeToFitHeight = heightInWorldUnits / 2f;
+        float sizeToFitWidth = (widthInWorldUnits / 2f) / cam.aspect;
+
+        // 3. Apply the largest requirement + 5% visual padding
+        cam.orthographicSize = Mathf.Max(sizeToFitHeight, sizeToFitWidth) * 1.05f;
     }
 
 }

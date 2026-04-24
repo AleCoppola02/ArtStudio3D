@@ -1,14 +1,20 @@
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using System.IO;
-using UnityEngine.Rendering;
+using System.Net;
 using Unity.Collections;
+using UnityEngine;
+using UnityEngine.Rendering;
 
 public class BackingStore
 {
+    private static readonly object fileLock = new object();
+    private volatile bool isShuttingDown = false;
+
+    // NEW: Track tiles that are currently in the background thread!
+    private HashSet<Vector3Int> inFlightSaves = new HashSet<Vector3Int>();
     // --- DISK I/O VARIABLES ---
-    private Texture2D blankTile;
+    private RenderTexture blankRT;
     private string saveDirectory;
 
     // The Master Dictionary
@@ -32,6 +38,12 @@ public class BackingStore
     private bool isWorkerRunning = false;
 
     public BackingStore(MonoBehaviour coroutineContext, PhysicalAtlas physicalAtlas, IndirectionTable[] tables) {
+        // Setup the Save Directory on your Hard Drive
+        saveDirectory = Path.Combine(Application.persistentDataPath, "SVT_Saves");
+        if (!Directory.Exists(saveDirectory)) {
+            Directory.CreateDirectory(saveDirectory);
+        }
+
         // We need the MonoBehaviour context to run Coroutines for our async mipmap generation
         context = coroutineContext;
         mipmapQueue = new Queue<Vector3Int>();
@@ -41,25 +53,29 @@ public class BackingStore
         atlas = physicalAtlas;
         indirectionTables = tables;
 
-        // 1. Setup the Blank Tile for "Cleaning" slots
-        blankTile = new Texture2D(atlas.TileSize, atlas.TileSize, TextureFormat.RGBA32, false);
-        Color32[] clearColors = new Color32[atlas.TileSize * atlas.TileSize];
-        for (int i = 0; i < clearColors.Length; i++) {
-            clearColors[i] = new Color32(255, 255, 255, 255); // White canvas
-        }
-        blankTile.SetPixels32(clearColors);
-        blankTile.Apply();
+        blankRT = new RenderTexture(atlas.TileSize, atlas.TileSize, 0, atlas.Texture.format);
+        blankRT.enableRandomWrite = true;
+        blankRT.Create();
 
-        // 2. Setup the Save Directory on your Hard Drive
-        saveDirectory = Path.Combine(Application.persistentDataPath, "SVT_Saves");
-        if (!Directory.Exists(saveDirectory)) {
-            Directory.CreateDirectory(saveDirectory);
-        }
+        RenderTexture.active = blankRT;
+        // set it to pure white (transparent in our shader) so when we copy it to a new slot, it's a clean slate for drawing
+        GL.Clear(false, true, Color.white);
+        RenderTexture.active = null;
+
+
 
         ClearAllSavedTiles();
     }
     public void RequestTile(int x, int y, int zoomLevel, bool forceAllocate = false) {
         Vector3Int tileAddress = new Vector3Int(x, y, zoomLevel);
+
+        // --- THE DEADLOCK FIX ---
+        lock (inFlightSaves) {
+            if (inFlightSaves.Contains(tileAddress)) {
+                return;
+            }
+        }
+        // ---------------------------------
 
         if (!tileDatabase.ContainsKey(tileAddress)) {
             tileDatabase.Add(tileAddress, new TileState { Address = tileAddress });
@@ -75,8 +91,6 @@ public class BackingStore
             // ==========================================
             // TRUE SPARSE LOGIC
             // ==========================================
-            // If the tile is totally blank (no PNG file) AND we aren't 
-            // actively drawing on it right now... ABORT! Do not waste VRAM!
             if (!fileExists && !forceAllocate) {
                 return;
             }
@@ -84,7 +98,19 @@ public class BackingStore
 
             Vector2Int? newSlot = atlas.AllocateSlot();
 
+            // VRAM IS FULL! We need to evict...
             if (newSlot == null) {
+
+                // ========================================================
+                // --- THE CORRECT SAFETY VALVE ---
+                // If the graphics card is overwhelmed with saves, refuse to evict!
+                lock (inFlightSaves) {
+                    if (inFlightSaves.Count > 15) {
+                        return; // Abort this request completely. Do not trigger EvictOldestTile()!
+                    }
+                }
+                // ========================================================
+
                 EvictOldestTile();
                 newSlot = atlas.AllocateSlot();
             }
@@ -98,9 +124,7 @@ public class BackingStore
                     LoadTileFromHardDrive(path, tile.PhysicalSlot);
                 }
                 else {
-                    // We only reach this if forceAllocate is TRUE.
-                    // Wipe the recycled VRAM slot clean so the user can start drawing!
-                    Graphics.CopyTexture(blankTile, 0, 0, 0, 0, atlas.TileSize, atlas.TileSize, atlas.Texture, 0, 0, tile.PhysicalSlot.x * atlas.TileSize, tile.PhysicalSlot.y * atlas.TileSize);
+                    Graphics.CopyTexture(blankRT, 0, 0, 0, 0, atlas.TileSize, atlas.TileSize, atlas.Texture, 0, 0, tile.PhysicalSlot.x * atlas.TileSize, tile.PhysicalSlot.y * atlas.TileSize);
                 }
 
                 indirectionTables[zoomLevel].SetTileMapping(x, y, tile.PhysicalSlot.x, tile.PhysicalSlot.y);
@@ -110,37 +134,6 @@ public class BackingStore
 
 
 
-
-    private void EvictOldestTile() {
-        if (activeTiles.Count == 0) return;
-
-        TileState oldestTile = activeTiles[0];
-        foreach (TileState tile in activeTiles) {
-            if (tile.LastAccessTime < oldestTile.LastAccessTime) {
-                oldestTile = tile;
-            }
-        }
-
-        if (oldestTile != null) {
-            Vector3Int oldestAddress = oldestTile.Address;
-
-            // --- NEW: SAVE TO DISK BEFORE EVICTING ---
-            if (oldestTile.IsDirty) {
-                SaveTileToHardDrive(oldestAddress, oldestTile.PhysicalSlot);
-                oldestTile.IsDirty = false;
-            }
-
-            // 2. Remove it from the GPU Map
-            indirectionTables[oldestAddress.z].ClearTileMapping(oldestAddress.x, oldestAddress.y);
-
-            // 3. Give the slot back to the Atlas
-            atlas.FreeSlot(oldestTile.PhysicalSlot);
-
-            // 4. Update the CPU records
-            oldestTile.IsLoaded = false;
-            activeTiles.Remove(oldestTile); // Remove it from the active list
-        }
-    }
 
     //Sync the indirection tables to the GPU at the end of the frame after all tile requests and evictions are done
     public void SyncGPU() {
@@ -167,37 +160,143 @@ public class BackingStore
         return Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.png");
     }
 
+
+
+    private void EvictOldestTile() {
+        
+        if (activeTiles.Count == 0) return;
+
+        // 1. Find the least recently accessed tile in VRAM
+        TileState oldestTile = activeTiles[0];
+        foreach (TileState tile in activeTiles) {
+            if (tile.LastAccessTime < oldestTile.LastAccessTime) {
+                oldestTile = tile;
+            }
+        }
+
+        
+        if (oldestTile != null) {
+            // Store the address before we wipe the slot for the new tile
+            Vector3Int oldestAddress = oldestTile.Address;
+
+            // 2. If it's dirty, save it to the hard drive before we lose the data!
+            if (oldestTile.IsDirty) {
+                Debug.Log("Saving dirty tile to hard drive: " + oldestAddress);
+                SaveTileToHardDrive(oldestAddress, oldestTile.PhysicalSlot);
+                oldestTile.IsDirty = false;
+            }
+
+            // 2. Remove it from the GPU Map
+            indirectionTables[oldestAddress.z].ClearTileMapping(oldestAddress.x, oldestAddress.y);
+
+            // 3. Give the slot back to the Atlas
+            atlas.FreeSlot(oldestTile.PhysicalSlot);
+
+            // 4. Update the CPU records
+            oldestTile.IsLoaded = false;
+            activeTiles.Remove(oldestTile); // Remove it from the active list
+
+            
+        }
+    }
+
     private void SaveTileToHardDrive(Vector3Int address, Vector2Int slot) {
+        // BREADCRUMB 1: Did the engine even try to save this tile?
+        Debug.Log($"[SVT Debug] 1. SaveTileToHardDrive CALLED for Tile: {address}");
+
+        lock (inFlightSaves) {
+            inFlightSaves.Add(address);
+        }
         string path = GetTilePath(address);
 
-        // Ask the GPU to grab the exact 256x256 square for this slot in the background
-        AsyncGPUReadback.Request(atlas.Texture, 0,
-            slot.x * atlas.TileSize, atlas.TileSize,
-            slot.y * atlas.TileSize, atlas.TileSize,
-            0, 1,
-            (request) => {
-                if (request.hasError) {
-                    Debug.LogError("Failed to read GPU texture for saving!");
-                    return;
+        RenderTexture snapshotRT = new RenderTexture(atlas.TileSize, atlas.TileSize, 0, atlas.Texture.format);
+        snapshotRT.enableRandomWrite = true;
+        snapshotRT.Create();
+
+        Graphics.CopyTexture(atlas.Texture, 0, 0, slot.x * atlas.TileSize, slot.y * atlas.TileSize, atlas.TileSize, atlas.TileSize, snapshotRT, 0, 0, 0, 0);
+
+        Debug.Log($"[SVT Debug] 2. Requesting GPU Readback for Tile: {address}");
+        AsyncGPUReadback.Request(snapshotRT, 0, TextureFormat.RGBA32, (request) => {
+
+            // BREADCRUMB 2: Did the GPU successfully hand the data back to the CPU?
+            Debug.Log($"[SVT Debug] 3. GPU Readback CALLBACK FIRED for Tile: {address}");
+
+            if (request.hasError) {
+                Debug.LogError($"[SVT Debug] ERROR: GPU Readback failed for {address}!");
+                Object.Destroy(snapshotRT);
+                lock (inFlightSaves) { inFlightSaves.Remove(address); }
+                return;
+            }
+
+            byte[] rawData = request.GetData<byte>().ToArray();
+            int width = atlas.TileSize;
+            int height = atlas.TileSize;
+
+            Debug.Log($"[SVT Debug] 4. Spinning up Background Thread for Tile: {address}");
+            System.Threading.Tasks.Task.Run(() => {
+                try {
+                    // BREADCRUMB 3: Did the thread start, or was it silently aborted?
+                    Debug.Log($"[SVT Debug] 5. Background Thread STARTED for Tile: {address}");
+
+                    if (isShuttingDown) {
+                        Debug.LogWarning($"[SVT Debug] ABORTED: isShuttingDown is TRUE!");
+                        return;
+                    }
+
+                    byte[] pngBytes = ImageConversion.EncodeArrayToPNG(
+                        rawData,
+                        UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm,
+                        (uint)width,
+                        (uint)height
+                    );
+
+                    lock (fileLock) {
+                        if (!isShuttingDown) {
+                            File.WriteAllBytes(path, pngBytes);
+                            // BREADCRUMB 4: The finish line!
+                            Debug.Log($"[SVT Debug] 6. SUCCESS! File actually written to: {path}");
+                        }
+                    }
                 }
-
-                // When the GPU is done, convert the data to a PNG and save it
-                Texture2D temp = new Texture2D(atlas.TileSize, atlas.TileSize, TextureFormat.RGBA32, false);
-                temp.SetPixelData(request.GetData<byte>(), 0);
-                temp.Apply();
-
-                File.WriteAllBytes(path, temp.EncodeToPNG());
-                Object.Destroy(temp); // Clean up memory!
+                catch (System.Exception e) {
+                    Debug.LogError($"[SVT Debug] THREAD CRASH: {e.Message}\n{e.StackTrace}");
+                }
+                finally {
+                    lock (inFlightSaves) {
+                        inFlightSaves.Remove(address);
+                    }
+                }
             });
+
+            Object.Destroy(snapshotRT);
+        });
     }
     private void LoadTileFromHardDrive(string path, Vector2Int slot) {
-        byte[] bytes = File.ReadAllBytes(path);
-        Texture2D temp = new Texture2D(atlas.TileSize, atlas.TileSize);
-        temp.LoadImage(bytes); // Auto-parses the PNG
+        
 
-        // Fast copy from CPU memory directly into the VRAM Atlas
-        Graphics.CopyTexture(temp, 0, 0, 0, 0, atlas.TileSize, atlas.TileSize, atlas.Texture, 0, 0, slot.x * atlas.TileSize, slot.y * atlas.TileSize);
-        Object.Destroy(temp); // Clean up memory!
+        byte[] bytes;
+        // LOCK THE HARD DRIVE: Prevent the main thread from reading a file while a background thread is saving it!
+        lock (fileLock) {
+            if (!File.Exists(path)) return;
+            bytes = File.ReadAllBytes(path);
+        }
+
+        Texture2D temp = new Texture2D(atlas.TileSize, atlas.TileSize);
+        temp.LoadImage(bytes);
+
+        RenderTexture bridgeRT = new RenderTexture(atlas.TileSize, atlas.TileSize, 0, atlas.Texture.format);
+        bridgeRT.enableRandomWrite = true;
+        bridgeRT.Create();
+
+        Graphics.Blit(temp, bridgeRT);
+
+        // THE WARNING FIX: Unbind the canvas before destroying it!
+        RenderTexture.active = null;
+
+        Graphics.CopyTexture(bridgeRT, 0, 0, 0, 0, atlas.TileSize, atlas.TileSize, atlas.Texture, 0, 0, slot.x * atlas.TileSize, slot.y * atlas.TileSize);
+
+        Object.Destroy(bridgeRT);
+        Object.Destroy(temp);
     }
 
     // Call this from the CanvasManager whenever a tile is painted on so we know to save it later
@@ -208,22 +307,35 @@ public class BackingStore
         }
     }
 
-    public void ClearAllSavedTiles() {
-        if (Directory.Exists(saveDirectory)) {
-            // Find all PNG files in our save folder
-            string[] files = Directory.GetFiles(saveDirectory, "*.png");
-
-            foreach (string file in files) {
-                try {
-                    File.Delete(file);
-                }
-                catch (System.Exception e) {
-                    Debug.LogWarning($"Failed to delete {file}: {e.Message}");
-                }
-            }
-
-            Debug.Log($"Successfully deleted {files.Length} temporary tile files.");
+    public void MarkTileDirty(Vector3Int address) {
+        if (tileDatabase.ContainsKey(address)) {
+            tileDatabase[address].IsDirty = true;
         }
+    }
+
+    public void ClearAllSavedTiles() {
+        // 1. Signal all background threads to immediately abort their saving tasks
+        isShuttingDown = true;
+
+        // 2. Lock the hard drive so no active thread can write while we are deleting
+        lock (fileLock) {
+            if (Directory.Exists(saveDirectory)) {
+                // Find all PNG files in our save folder
+                string[] files = Directory.GetFiles(saveDirectory, "*.png");
+
+                foreach (string file in files) {
+                    try {
+                        File.Delete(file);
+                    }
+                    catch (System.Exception e) {
+                        Debug.LogWarning($"Failed to delete {file}: {e.Message}");
+                    }
+                }
+
+                Debug.Log($"Successfully deleted {files.Length} temporary tile files.");
+            }
+        }
+        isShuttingDown = false;
     }
 
     // ==========================================
@@ -268,104 +380,162 @@ public class BackingStore
         int childZoom = destZoom - 1;
         int tileSize = atlas.TileSize;
 
-        RenderTexture tempRT = RenderTexture.GetTemporary(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
-        RenderTexture.active = tempRT;
-        GL.Clear(true, true, Color.white);
+        // Calculate the addresses of the 4 children
+        Vector3Int c1 = new Vector3Int(destX * 2, destY * 2, childZoom);
+        Vector3Int c2 = new Vector3Int(destX * 2 + 1, destY * 2, childZoom);
+        Vector3Int c3 = new Vector3Int(destX * 2, destY * 2 + 1, childZoom);
+        Vector3Int c4 = new Vector3Int(destX * 2 + 1, destY * 2 + 1, childZoom);
 
+        // --- FIX 1: THE IN-FLIGHT GUARD ---
+        // Wait for all 4 children to safely land on the hard drive before reading them!
+        yield return new WaitUntil(() =>
+            !IsTileInFlight(c1) &&
+            !IsTileInFlight(c2) &&
+            !IsTileInFlight(c3) &&
+            !IsTileInFlight(c4)
+        );
+
+        // 1. Create a dedicated, UAV-compatible canvas for the bake
+        RenderTexture tempRT = new RenderTexture(tileSize, tileSize, 0, atlas.Texture.format);
+        tempRT.enableRandomWrite = true;
+        tempRT.Create();
+
+        RenderTexture.active = tempRT;
+
+        // ==========================================
+        //  CLEAR TO TRANSPARENT! 
+        // We only want to save the ink, not the paper!
+        GL.Clear(false, true, Color.clear);
+        // ==========================================
+
+        // ==========================================
+        // FIX 2: ORTHO PERCENTAGE MATH
+        // This stops Unity from physically scrambling the tiles upside down
         GL.PushMatrix();
         GL.LoadOrtho();
 
-        // Stamping the 4 children into the temp canvas (pulling from VRAM if possible!)
-        DrawChildToQuadrant(destX * 2, destY * 2, childZoom, 0f, 0f);
-        DrawChildToQuadrant(destX * 2 + 1, destY * 2, childZoom, 0.5f, 0f);
-        DrawChildToQuadrant(destX * 2, destY * 2 + 1, childZoom, 0f, 0.5f);
-        DrawChildToQuadrant(destX * 2 + 1, destY * 2 + 1, childZoom, 0.5f, 0.5f);
+        DrawChildToQuadrant(c1.x, c1.y, childZoom, atlas, 0f, 0f);       // Bottom-Left
+        DrawChildToQuadrant(c2.x, c2.y, childZoom, atlas, 0.5f, 0f);     // Bottom-Right
+        DrawChildToQuadrant(c3.x, c3.y, childZoom, atlas, 0f, 0.5f);     // Top-Left
+        DrawChildToQuadrant(c4.x, c4.y, childZoom, atlas, 0.5f, 0.5f);   // Top-Right
 
         GL.PopMatrix();
+        // ==========================================
 
-        // Request the pixels asynchronously
+        RenderTexture.active = null;
+
+        Vector3Int parentAddress = new Vector3Int(destX, destY, destZoom);
+
+        // ==========================================
+        // --- INSTANT VRAM REFRESH ---
+        // ==========================================
+        if (tileDatabase.TryGetValue(parentAddress, out TileState parentState)) {
+            if (parentState.IsLoaded) {
+                Graphics.CopyTexture(tempRT, 0, 0, 0, 0, tileSize, tileSize, atlas.Texture, 0, 0, parentState.PhysicalSlot.x * tileSize, parentState.PhysicalSlot.y * tileSize);
+            }
+        }
+
+        // --- FIX 3: PROTECT THE PARENT TILE ---
+        // Lock this parent tile so the Camera doesn't try to load it while it's writing!
+        lock (inFlightSaves) {
+            inFlightSaves.Add(parentAddress);
+        }
+
+        string parentPath = GetTilePath(parentAddress);
+
+        // 2. Ask the GPU to download the pixels for our hard drive save
         AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(tempRT, 0, TextureFormat.RGBA32);
 
         yield return new WaitUntil(() => request.done);
 
         if (!request.hasError) {
-            NativeArray<byte> nativeArray = request.GetData<byte>();
+            // 3. Rip the raw bytes instantly to avoid Texture2D main-thread stalling
+            byte[] rawData = request.GetData<byte>().ToArray();
 
-            Texture2D readbackTex = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false);
-            readbackTex.LoadRawTextureData(nativeArray);
-            readbackTex.Apply();
+            // 4. Send the heavy PNG encoding to a background CPU thread
+            System.Threading.Tasks.Task.Run(() => {
+                try {
+                    // If the app closed while we were compressing, abort the save!
+                    if (isShuttingDown) return;
 
-            // Save to disk
-            string parentPath = GetTilePath(new Vector3Int(destX, destY, destZoom));
-            File.WriteAllBytes(parentPath, readbackTex.EncodeToPNG());
+                    byte[] pngBytes = ImageConversion.EncodeArrayToPNG(
+                        rawData,
+                        UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm,
+                        (uint)tileSize,
+                        (uint)tileSize
+                    );
 
-            // ==========================================
-            // --- NEW: LIVE VRAM REFRESH ---
-            // ==========================================
-            // Check if the camera is actively looking at this lower-resolution tile
-            Vector3Int parentAddress = new Vector3Int(destX, destY, destZoom);
-            if (tileDatabase.ContainsKey(parentAddress)) {
-                TileState state = tileDatabase[parentAddress];
-
-                if (state.IsLoaded) {
-                    // It is in VRAM! Instantly overwrite the old visual data with the new squished ink!
-                    Graphics.CopyTexture(readbackTex, 0, 0, 0, 0, tileSize, tileSize, atlas.Texture, 0, 0, state.PhysicalSlot.x * tileSize, state.PhysicalSlot.y * tileSize);
+                    // LOCK THE HARD DRIVE!
+                    lock (fileLock) {
+                        if (!isShuttingDown) {
+                            File.WriteAllBytes(parentPath, pngBytes);
+                        }
+                    }
                 }
-            }
-            // ==========================================
-
-            Object.Destroy(readbackTex);
+                catch (System.Exception e) {
+                    Debug.LogError("Mipmap Save Thread Failed: " + e.Message);
+                }
+                finally {
+                    // --- FIX 4: UNLOCK ON SUCCESS ---
+                    lock (inFlightSaves) {
+                        inFlightSaves.Remove(parentAddress);
+                    }
+                }
+            });
 
             // Chain Reaction: Queue the next zoom level up!
             QueueMipmapUpdate(destX, destY, destZoom);
         }
         else {
             Debug.LogError("AsyncGPUReadback failed while baking mipmap!");
+            // --- FIX 5: UNLOCK ON ERROR ---
+            lock (inFlightSaves) {
+                inFlightSaves.Remove(parentAddress);
+            }
         }
 
-        // Clean up
-        RenderTexture.active = null;
-        RenderTexture.ReleaseTemporary(tempRT);
+        // Clean up our dedicated canvas
+        Object.Destroy(tempRT);
     }
 
-    private void DrawChildToQuadrant(int childX, int childY, int childZoom, float xOffset, float yOffset) {
-        // ==========================================
-        // 1. CHECK VRAM (UN-EVICTED / ACTIVE TILES)
-        // ==========================================
-        Vector2Int? physicalSlot = GetPhysicalSlot(childX, childY, childZoom);
+    private void DrawChildToQuadrant(int childX, int childY, int childZoom, PhysicalAtlas atlas, float xOffset, float yOffset) {
+        // Back to your original, perfect 0.0 to 1.0 percentage coordinates!
+        Rect destRect = new Rect(xOffset, yOffset, 0.5f, 0.5f);
 
-        if (physicalSlot != null) {
-            // Calculate the UV coordinates (0.0 to 1.0) of this specific slot inside the Atlas
+        Vector3Int childAddress = new Vector3Int(childX, childY, childZoom);
+
+        // 1. CHECK VRAM
+        if (tileDatabase.TryGetValue(childAddress, out TileState childState) && childState.IsLoaded) {
             float uvWidth = (float)atlas.TileSize / atlas.Texture.width;
             float uvHeight = (float)atlas.TileSize / atlas.Texture.height;
-            float uvX = physicalSlot.Value.x * uvWidth;
-            float uvY = physicalSlot.Value.y * uvHeight;
+            float uvX = childState.PhysicalSlot.x * uvWidth;
+            float uvY = childState.PhysicalSlot.y * uvHeight;
 
             Rect sourceUV = new Rect(uvX, uvY, uvWidth, uvHeight);
-            Rect destRect = new Rect(xOffset, yOffset, 0.5f, 0.5f);
 
-            // Fast GPU-to-GPU copy: Draw this exact slice of the Atlas directly onto our parent tile
             Graphics.DrawTexture(destRect, atlas.Texture, sourceUV, 0, 0, 0, 0, Color.white, null, -1);
-
-            return; // Success! We bypass the hard drive entirely.
+            return;
         }
 
-        // ==========================================
-        // 2. CHECK HARD DRIVE (EVICTED / SAVED TILES)
-        // ==========================================
-        string childPath = GetTilePath(new Vector3Int(childX, childY, childZoom));
+        // 2. CHECK HARD DRIVE
+        string childPath = GetTilePath(childAddress);
 
-        // If it's neither in VRAM nor on the hard drive, it's a completely blank tile area.
-        if (!File.Exists(childPath)) return;
+        byte[] bytes;
+        lock (fileLock) {
+            if (!File.Exists(childPath)) return;
+            bytes = File.ReadAllBytes(childPath);
+        }
 
-        // Load the saved tile from disk
-        byte[] bytes = File.ReadAllBytes(childPath);
         Texture2D childTex = new Texture2D(atlas.TileSize, atlas.TileSize);
         childTex.LoadImage(bytes);
 
-        // Draw it into the quadrant
-        Graphics.DrawTexture(new Rect(xOffset, yOffset, 0.5f, 0.5f), childTex);
+        Graphics.DrawTexture(destRect, childTex);
 
-        Object.Destroy(childTex); // Clean up memory to prevent leaks
+        Object.Destroy(childTex);
+    }
+    public bool IsTileInFlight(Vector3Int address) {
+        lock (inFlightSaves) {
+            return inFlightSaves.Contains(address);
+        }
     }
 }
