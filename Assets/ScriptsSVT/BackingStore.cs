@@ -69,13 +69,16 @@ public class BackingStore
     public void RequestTile(int x, int y, int zoomLevel, bool forceAllocate = false) {
         Vector3Int tileAddress = new Vector3Int(x, y, zoomLevel);
 
-        // --- THE DEADLOCK FIX ---
+        // ========================================================
+        // FIX 1: REMOVED THE DEADLOCK LOOP
+        // If the camera asks for a tile that is currently saving, just wait till next frame.
+        // If the brush loops back over a tile that is currently saving, it forces it anyway!
+        // ========================================================
         lock (inFlightSaves) {
-            if (inFlightSaves.Contains(tileAddress)) {
+            if (inFlightSaves.Contains(tileAddress) && !forceAllocate) {
                 return;
             }
         }
-        // ---------------------------------
 
         if (!tileDatabase.ContainsKey(tileAddress)) {
             tileDatabase.Add(tileAddress, new TileState { Address = tileAddress });
@@ -88,29 +91,26 @@ public class BackingStore
             string path = GetTilePath(tileAddress);
             bool fileExists = File.Exists(path);
 
-            // ==========================================
-            // TRUE SPARSE LOGIC
-            // ==========================================
             if (!fileExists && !forceAllocate) {
                 return;
             }
-            // ==========================================
 
             Vector2Int? newSlot = atlas.AllocateSlot();
 
-            // VRAM IS FULL! We need to evict...
             if (newSlot == null) {
 
                 // ========================================================
-                // --- THE CORRECT SAFETY VALVE ---
-                // If the graphics card is overwhelmed with saves, refuse to evict!
+                // FIX 2: REMOVED THE DEADLOCK LOOP
+                // The camera respects the 15-tile speed limit.
+                // The brush bulldozes through it and guarantees your ink is saved.
+                // ========================================================
                 lock (inFlightSaves) {
-                    if (inFlightSaves.Count > 15) {
-                        return; // Abort this request completely. Do not trigger EvictOldestTile()!
+                    if (inFlightSaves.Count >= 15 && !forceAllocate) {
+                        return; // Camera gives up
                     }
                 }
-                // ========================================================
 
+                // If we get here, either VRAM has space, OR it's the brush forcing an eviction!
                 EvictOldestTile();
                 newSlot = atlas.AllocateSlot();
             }
@@ -121,9 +121,21 @@ public class BackingStore
                 activeTiles.Add(tile);
 
                 if (fileExists) {
-                    LoadTileFromHardDrive(path, tile.PhysicalSlot);
+                    // (Assuming you have a method here to load from disk, like your previous code!)
+                    // LoadTileFromHardDrive(path, tile.PhysicalSlot); 
+
+                    // For safety, here is the raw memory load:
+                    byte[] bytes;
+                    lock (fileLock) {
+                        bytes = File.ReadAllBytes(path);
+                    }
+                    Texture2D diskTex = new Texture2D(atlas.TileSize, atlas.TileSize);
+                    diskTex.LoadImage(bytes);
+                    Graphics.CopyTexture(diskTex, 0, 0, 0, 0, atlas.TileSize, atlas.TileSize, atlas.Texture, 0, 0, tile.PhysicalSlot.x * atlas.TileSize, tile.PhysicalSlot.y * atlas.TileSize);
+                    Object.Destroy(diskTex);
                 }
                 else {
+                    // Blank tile
                     Graphics.CopyTexture(blankRT, 0, 0, 0, 0, atlas.TileSize, atlas.TileSize, atlas.Texture, 0, 0, tile.PhysicalSlot.x * atlas.TileSize, tile.PhysicalSlot.y * atlas.TileSize);
                 }
 
@@ -400,31 +412,19 @@ public class BackingStore
         tempRT.enableRandomWrite = true;
         tempRT.Create();
 
+        // Clear the canvas to transparent so we don't accidentally bake white paper!
         RenderTexture.active = tempRT;
-
-        // ==========================================
-        //  CLEAR TO TRANSPARENT! 
-        // We only want to save the ink, not the paper!
         GL.Clear(false, true, Color.clear);
-        // ==========================================
-
-        // ==========================================
-        // FIX 2: ORTHO PERCENTAGE MATH
-        // This stops Unity from physically scrambling the tiles upside down
-        GL.PushMatrix();
-        GL.LoadOrtho();
-
-        DrawChildToQuadrant(c1.x, c1.y, childZoom, atlas, 0f, 0f);       // Bottom-Left
-        DrawChildToQuadrant(c2.x, c2.y, childZoom, atlas, 0.5f, 0f);     // Bottom-Right
-        DrawChildToQuadrant(c3.x, c3.y, childZoom, atlas, 0f, 0.5f);     // Top-Left
-        DrawChildToQuadrant(c4.x, c4.y, childZoom, atlas, 0.5f, 0.5f);   // Top-Right
-
-        GL.PopMatrix();
-        // ==========================================
-
         RenderTexture.active = null;
 
+        // NO MATRICES! Just pass tempRT directly to our new raw-memory method!
+        DrawChildToQuadrant(c1.x, c1.y, childZoom, atlas, tempRT);
+        DrawChildToQuadrant(c2.x, c2.y, childZoom, atlas, tempRT);
+        DrawChildToQuadrant(c3.x, c3.y, childZoom, atlas, tempRT);
+        DrawChildToQuadrant(c4.x, c4.y, childZoom, atlas, tempRT);
+
         Vector3Int parentAddress = new Vector3Int(destX, destY, destZoom);
+
 
         // ==========================================
         // --- INSTANT VRAM REFRESH ---
@@ -498,41 +498,59 @@ public class BackingStore
         Object.Destroy(tempRT);
     }
 
-    private void DrawChildToQuadrant(int childX, int childY, int childZoom, PhysicalAtlas atlas, float xOffset, float yOffset) {
-        // Back to your original, perfect 0.0 to 1.0 percentage coordinates!
-        Rect destRect = new Rect(xOffset, yOffset, 0.5f, 0.5f);
+
+    private void DrawChildToQuadrant(int childX, int childY, int childZoom, PhysicalAtlas atlas, RenderTexture parentRT) {
+        int tileSize = atlas.TileSize;
+        int halfSize = tileSize / 2; // 128
+
+        // CopyTexture operates directly in GPU memory. Bottom-Left is ALWAYS (0,0)
+        int xPixels = (childX % 2 == 0) ? 0 : halfSize;
+        int yPixels = (childY % 2 == 0) ? 0 : halfSize;
 
         Vector3Int childAddress = new Vector3Int(childX, childY, childZoom);
 
-        // 1. CHECK VRAM
+        Texture sourceTex = null;
+        Texture2D diskTex = null;
+        RenderTexture vramSlice = null;
+
+        // 1. GET THE 256x256 SOURCE TEXTURE
         if (tileDatabase.TryGetValue(childAddress, out TileState childState) && childState.IsLoaded) {
-            float uvWidth = (float)atlas.TileSize / atlas.Texture.width;
-            float uvHeight = (float)atlas.TileSize / atlas.Texture.height;
-            float uvX = childState.PhysicalSlot.x * uvWidth;
-            float uvY = childState.PhysicalSlot.y * uvHeight;
+            vramSlice = RenderTexture.GetTemporary(tileSize, tileSize, 0, atlas.Texture.format);
+            // Pluck the exact 256x256 tile out of the giant VRAM Atlas
+            Graphics.CopyTexture(atlas.Texture, 0, 0, childState.PhysicalSlot.x * tileSize, childState.PhysicalSlot.y * tileSize, tileSize, tileSize, vramSlice, 0, 0, 0, 0);
+            vramSlice.filterMode = FilterMode.Bilinear;
+            sourceTex = vramSlice;
+        }
+        else {
+            string childPath = GetTilePath(childAddress);
+            byte[] bytes = null;
+            lock (fileLock) {
+                if (File.Exists(childPath)) bytes = File.ReadAllBytes(childPath);
+            }
+            if (bytes == null) return; // Completely blank tile area
 
-            Rect sourceUV = new Rect(uvX, uvY, uvWidth, uvHeight);
-
-            Graphics.DrawTexture(destRect, atlas.Texture, sourceUV, 0, 0, 0, 0, Color.white, null, -1);
-            return;
+            diskTex = new Texture2D(tileSize, tileSize);
+            diskTex.LoadImage(bytes);
+            diskTex.filterMode = FilterMode.Bilinear; // Protect the ink from skipping!
+            sourceTex = diskTex;
         }
 
-        // 2. CHECK HARD DRIVE
-        string childPath = GetTilePath(childAddress);
+        // 2. PERFECT DOWNSAMPLE (Fixes the Fading Alpha!)
+        RenderTexture downsampledRT = RenderTexture.GetTemporary(halfSize, halfSize, 0, atlas.Texture.format);
+        // Blit completely overwrites the destination. No GUI Alpha blending means no decay!
+        Graphics.Blit(sourceTex, downsampledRT);
 
-        byte[] bytes;
-        lock (fileLock) {
-            if (!File.Exists(childPath)) return;
-            bytes = File.ReadAllBytes(childPath);
-        }
+        // 3. EXACT PLACEMENT (Fixes the Scrambling!)
+        // Move the raw 128x128 memory block directly into the parent tile quadrant
+        Graphics.CopyTexture(downsampledRT, 0, 0, 0, 0, halfSize, halfSize, parentRT, 0, 0, xPixels, yPixels);
 
-        Texture2D childTex = new Texture2D(atlas.TileSize, atlas.TileSize);
-        childTex.LoadImage(bytes);
-
-        Graphics.DrawTexture(destRect, childTex);
-
-        Object.Destroy(childTex);
+        // 4. CLEANUP (Prevent Memory Leaks)
+        RenderTexture.ReleaseTemporary(downsampledRT);
+        if (vramSlice != null) RenderTexture.ReleaseTemporary(vramSlice);
+        if (diskTex != null) Object.Destroy(diskTex);
     }
+
+
     public bool IsTileInFlight(Vector3Int address) {
         lock (inFlightSaves) {
             return inFlightSaves.Contains(address);
