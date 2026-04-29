@@ -267,13 +267,6 @@ public class GhostCanvas : MonoBehaviour
         if (!request.hasError) {
             var nativeArray = request.GetData<byte>();
             byte[] rawBytes = nativeArray.ToArray();
-
-            // Note: ARGB32 might output with incorrect colors in PNG Debugging, but the internal Engine data is mathematically perfect now!
-            Texture2D debugTex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
-            debugTex.LoadRawTextureData(rawBytes);
-            File.WriteAllBytes(Path.Combine(saveDirectory, $"DEBUG_Tile_{address.z}_{address.x}_{address.y}.png"), debugTex.EncodeToPNG());
-            Destroy(debugTex);
-
             ramCache[address] = rawBytes;
             pendingDiskWrites.TryAdd(address, 1);
             flushQueue.Enqueue((address, rawBytes));
@@ -523,11 +516,7 @@ public class GhostCanvas : MonoBehaviour
                 ramCache[parentAddress] = data;
                 pendingDiskWrites.TryAdd(parentAddress, 1);
                 flushQueue.Enqueue((parentAddress, data));
-                // Note: ARGB32 might output with incorrect colors in PNG Debugging, but the internal Engine data is mathematically perfect now!
-                Texture2D debugTex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
-                debugTex.LoadRawTextureData(data);
-                File.WriteAllBytes(Path.Combine(saveDirectory, $"DEBUG_Tile_{parentAddress.z}_{parentAddress.x}_{parentAddress.y}.png"), debugTex.EncodeToPNG());
-                Destroy(debugTex);
+
                 // Instantly update VRAM if the camera is currently looking at this mipmap!
                 backingStore?.OnChunkBaked(new HashSet<Vector3Int> { parentAddress }, -1, false);
             }

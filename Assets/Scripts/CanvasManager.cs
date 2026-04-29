@@ -48,13 +48,11 @@ public class CanvasManager : MonoBehaviour
         RenderTexture.active = null;
 
         tables = new IndirectionTable[numMipmapLevels];
-        int currentWidth = canvasWidthInTiles;
-        int currentHeight = canvasHeightInTiles;
-
-        for (int i = 0; i < numMipmapLevels; i++) {
-            tables[i] = new IndirectionTable(i, currentWidth, currentHeight);
-            currentWidth = Mathf.Max(1, currentWidth / 2);
-            currentHeight = Mathf.Max(1, currentHeight / 2);
+        for (int z = 0; z < numMipmapLevels; z++) {
+            // CRITICAL FIX: Use CeilToInt with Pow so odds don't get truncated!
+            int w = Mathf.CeilToInt(canvasWidthInTiles / Mathf.Pow(2, z));
+            int h = Mathf.CeilToInt(canvasHeightInTiles / Mathf.Pow(2, z));
+            tables[z] = new IndirectionTable(z, w, h);
         }
 
         // 4. Initialize the Background Workers
@@ -90,8 +88,9 @@ public class CanvasManager : MonoBehaviour
         float scaleMultiplier = Mathf.Pow(2, zoomLevel);
         float currentUnitsPerTile = worldUnitsPerTile * scaleMultiplier;
 
-        int currentWidthInTiles = Mathf.Max(1, canvasWidthInTiles >> zoomLevel);
-        int currentHeightInTiles = Mathf.Max(1, canvasHeightInTiles >> zoomLevel);
+        // CRITICAL FIX: Match the exact math of the Table Generator!
+        int currentWidthInTiles = Mathf.CeilToInt(canvasWidthInTiles / scaleMultiplier);
+        int currentHeightInTiles = Mathf.CeilToInt(canvasHeightInTiles / scaleMultiplier);
 
         float canvasWorldWidth = canvasWidthInTiles * worldUnitsPerTile;
         float canvasWorldHeight = canvasHeightInTiles * worldUnitsPerTile;
