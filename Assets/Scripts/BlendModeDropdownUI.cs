@@ -5,8 +5,11 @@ using System.Collections.Generic;
 public class BlendModeUI : MonoBehaviour
 {
     public TMP_Dropdown dropdown;
-    public InkLayerManager inkLayer;
-    public List<BlendModeConfig> availableModes; // The list of SOs
+
+    // CHANGED: We now talk to the BrushManager instead of the InkLayerManager
+    public BrushManager brushManager;
+
+    public List<BlendModeConfig> availableModes; // The list of ScriptableObjects
 
     void Start() {
         dropdown.ClearOptions();
@@ -17,12 +20,14 @@ public class BlendModeUI : MonoBehaviour
         }
         dropdown.AddOptions(options);
 
-        // When the value changes, send the object directly
+        // When the value changes, update the active setting in BrushManager
         dropdown.onValueChanged.AddListener(index => {
-            inkLayer.SetBlendMode(availableModes[index]);
+            brushManager.currentBlendMode = availableModes[index];
         });
 
         // Set initial default
-        if (availableModes.Count > 0) inkLayer.SetBlendMode(availableModes[0]);
+        if (availableModes.Count > 0) {
+            brushManager.currentBlendMode = availableModes[0];
+        }
     }
-}
+} 

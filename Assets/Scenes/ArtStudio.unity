@@ -992,7 +992,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BlendModeDropdown
   dropdown: {fileID: 258574485}
-  inkLayer: {fileID: 1091343047}
+  brushManager: {fileID: 1814169578}
   availableModes:
   - {fileID: 11400000, guid: a5139dc25b336954984eef7a5a5959c4, type: 2}
   - {fileID: 11400000, guid: 69daf92a0d624cf47a691bf5feb5adfc, type: 2}
@@ -1228,7 +1228,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &318025607
 Transform:
   m_ObjectHideFlags: 0
@@ -3131,8 +3131,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e8d3ef06d6ccad4c8b080e003f5f372, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::InkLayer
-  previewOverlay: {fileID: 63001189}
-  inkLayerMaterial: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
+  previewOverlayTemplate: {fileID: 63001189}
   previewMaterial: {fileID: 2100000, guid: ef6bcf263c0c0ca4fbd1b8ba6f98c45c, type: 2}
   opacity: 0.5
 --- !u!1 &1102848062
@@ -3266,12 +3265,12 @@ MonoBehaviour:
   worldUnitsPerTile: 1
   tileRequester: {fileID: 330585548}
   svtCanvasMaterial: {fileID: 2100000, guid: 2d32f37e5827beb4db446f1f23df6f90, type: 2}
-  brushManager: {fileID: 1814169578}
+  ghostCanvas: {fileID: 2093584103}
   inkLayerManager: {fileID: 1091343047}
+  inkLayerMaterial: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
   canvasWidthInTiles: 8
   canvasHeightInTiles: 8
-  debugAtlasRT: {fileID: 0}
-  canvasRT: {fileID: 8400000, guid: 09a910ce296790f47a2f24203af30e23, type: 2}
+  brushManager: {fileID: 1814169578}
 --- !u!1 &1104400898
 GameObject:
   m_ObjectHideFlags: 0
@@ -4868,12 +4867,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   sizeMode: 0
   brushMaterial: {fileID: 2100000, guid: 9d774e1eccd61824a90a85fa4786370b, type: 2}
-  inkLayerMaterial: {fileID: 2100000, guid: 9763c4a1def03374ea23db803135d057, type: 2}
+  currentBlendMode: {fileID: 11400000, guid: 69daf92a0d624cf47a691bf5feb5adfc, type: 2}
   brushSizeUI: 50
+  brushColor: {r: 0, g: 0, b: 0, a: 1}
   spacingFactor: 0.05
   cam: {fileID: 330585545}
-  inkLayer: {fileID: 1091343047}
-  canvas: {fileID: 1102848067}
+  inkLayerManager: {fileID: 1091343047}
+  activeDocumentLayerID: 0
 --- !u!4 &1814169579
 Transform:
   m_ObjectHideFlags: 0
@@ -5359,6 +5359,57 @@ RectTransform:
   m_AnchoredPosition: {x: -5, y: 0}
   m_SizeDelta: {x: -20, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!1 &2093584102
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2093584104}
+  - component: {fileID: 2093584103}
+  m_Layer: 0
+  m_Name: GhostCanvas
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2093584103
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2093584102}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 49ded18229ccd0e4aa93f3801fe3cb80, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GhostCanvas
+  tileSize: 256
+  saveDirectory: 
+  maxRamCacheSizeMB: 500
+  maxCruciblesPerFrame: 30
+  canvasManager: {fileID: 1102848067}
+  mipmapMaterial: {fileID: 2100000, guid: 939af5054fe564249891624cc6a69c0d, type: 2}
+  mergeMaterial: {fileID: 0}
+--- !u!4 &2093584104
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2093584102}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2102172325
 GameObject:
   m_ObjectHideFlags: 0
@@ -5548,3 +5599,4 @@ SceneRoots:
   - {fileID: 1814169579}
   - {fileID: 121691389}
   - {fileID: 1102848066}
+  - {fileID: 2093584104}

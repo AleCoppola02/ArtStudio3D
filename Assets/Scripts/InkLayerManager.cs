@@ -1,75 +1,134 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
-using UnityEngine.UI; // REQUIRED: Lets us talk to the UI RawImage
+using UnityEngine.UI;
 
 public class InkLayerManager : MonoBehaviour
 {
+    // --- INNER CLASS FOR THE POOL ---
+    private class PreviewLayer
+    {
+        public int strokeID;
+        public RenderTexture rt;
+        public RawImage uiImage;
+        public Material uiMaterialInstance;
+        public bool isActive;
+    }
     [Header("UI Connections")]
-    public RawImage previewOverlay; // Drag your new UI LivePreviewOverlay here!
+    [Tooltip("This RawImage will be used as a template to spawn new overlapping layers as needed.")]
+    public RawImage previewOverlayTemplate;
 
     [Header("Material & Settings")]
-    public Material inkLayerMaterial;
     public Material previewMaterial;
-
     [Range(0, 1)] public float opacity = 0.5f;
-    
-    // This is now strictly managed by code, no longer assigned in the Inspector
-    private RenderTexture inkLayerRT; 
-    
-    private Color inkLayerColor = new Vector4(0, 0, 0, 0);
+
+    private List<PreviewLayer> layerPool = new List<PreviewLayer>();
+    private int strokeCounter = 0;
+    private Color clearColor = new Color(0, 0, 0, 0); // Perfectly transparent
 
     private void Awake() {
-        // 1. Create a texture that perfectly matches the current monitor resolution
-        inkLayerRT = new RenderTexture(Screen.width, Screen.height, 0, RenderTextureFormat.ARGB32);
-        
-        // Prevent blending artifacts on the UI overlay
-        inkLayerRT.filterMode = FilterMode.Point; 
-        inkLayerRT.Create();
-
-        // 2. Slap it onto the UI Raw Image
-        if (previewOverlay != null) {
-            previewOverlay.texture = inkLayerRT;
+        // Hide the template so it doesn't show up as an empty box
+        if (previewOverlayTemplate != null) {
+            previewOverlayTemplate.gameObject.SetActive(false);
         }
-
-        // 3. Also set it on the preview material for shader access
-        if (previewMaterial != null) {
-            previewMaterial.SetTexture("_MainTex", inkLayerRT);
-        }
-
-        ClearInkLayer();
     }
 
-    public void ClearInkLayer() {
-        if (inkLayerRT != null) {
-            RenderTexture.active = inkLayerRT;
-            GL.Clear(true, true, inkLayerColor);
+    /// <summary>
+    /// Called by BrushManager when the user first touches the screen.
+    /// Grabs an available UI overlay texture so the stroke can be drawn without lag.
+    /// </summary>
+    public (int strokeID, RenderTexture rt) RequestNewPreviewLayer(BlendModeConfig blendMode, float strokeOpacity) {
+        PreviewLayer layer = GetOrCreateLayerFromPool();
+
+        layer.strokeID = ++strokeCounter;
+        layer.isActive = true;
+        layer.uiImage.gameObject.SetActive(true);
+
+        // Wipe it clean just in case
+        RenderTexture.active = layer.rt;
+        GL.Clear(true, true, clearColor);
+        RenderTexture.active = null;
+
+        if (layer.uiMaterialInstance != null) {
+            // Apply the correct blend mode
+            if (blendMode != null) blendMode.SetBlendMode(layer.uiMaterialInstance);
+
+            // NEW: Apply the Opacity limit!
+            layer.uiMaterialInstance.SetFloat("_Opacity", strokeOpacity);
+        }
+
+        return (layer.strokeID, layer.rt);
+    }
+
+    /// <summary>
+    /// Called when BackingStore completely finishes saving a stroke to the SVT/Disk.
+    /// We can now safely wipe the UI preview, letting the underlying SVT show the permanent data.
+    /// </summary>
+    public void ReleaseStrokeLayer(int strokeID) {
+        PreviewLayer layer = layerPool.Find(l => l.strokeID == strokeID && l.isActive);
+        if (layer != null) {
+            // Wipe the texture to free memory
+            RenderTexture.active = layer.rt;
+            GL.Clear(true, true, clearColor);
             RenderTexture.active = null;
+
+            // Deactivate and return to pool
+            layer.isActive = false;
+            layer.uiImage.gameObject.SetActive(false);
         }
     }
+
+    // --- POOL MANAGEMENT ---
+
+    private PreviewLayer GetOrCreateLayerFromPool() {
+        // 1. Try to find a sleeping layer
+        foreach (var layer in layerPool) {
+            if (!layer.isActive) return layer;
+        }
+
+        // 2. If all layers are currently being drawn on/saving, create a new one!
+        PreviewLayer newLayer = new PreviewLayer();
+
+        // Create the fullscreen render texture
+        newLayer.rt = new RenderTexture(Screen.width, Screen.height, 0, RenderTextureFormat.ARGB32);
+        newLayer.rt.filterMode = FilterMode.Point;
+        newLayer.rt.Create();
+
+        // Clone the UI Image so it stacks on top
+        if (previewOverlayTemplate != null) {
+            GameObject cloneObj = Instantiate(previewOverlayTemplate.gameObject, previewOverlayTemplate.transform.parent);
+            newLayer.uiImage = cloneObj.GetComponent<RawImage>();
+            newLayer.uiImage.texture = newLayer.rt;
+
+            // We need a unique material instance per layer, so 
+            // concurrent strokes can have different blend modes/opacities
+            if (previewMaterial != null) {
+                newLayer.uiMaterialInstance = new Material(previewMaterial);
+                newLayer.uiMaterialInstance.SetTexture("_MainTex", newLayer.rt);
+                newLayer.uiImage.material = newLayer.uiMaterialInstance;
+                newLayer.uiMaterialInstance.SetFloat("_Opacity", opacity);
+            }
+        }
+
+        layerPool.Add(newLayer);
+        return newLayer;
+    }
+
+    // --- UTILITIES ---
 
     public void SetOpacity(float opacity) {
         this.opacity = opacity;
-        inkLayerMaterial.SetFloat("_Opacity", opacity);
-        if (previewMaterial != null) previewMaterial.SetFloat("_Opacity", opacity);
+        foreach (var layer in layerPool) {
+            if (layer.uiMaterialInstance != null) {
+                layer.uiMaterialInstance.SetFloat("_Opacity", opacity);
+            }
+        }
     }
 
-    public RenderTexture GetInkLayerRT() {
-        return inkLayerRT;
-    }
-
-    // ------------------------------------------------------------------
-    // NOTE: ApplyInkToCanvas() HAS BEEN COMPLETELY DELETED!
-    // The SVT Bake process in CanvasManager will handle saving the stroke.
-    // ------------------------------------------------------------------
-
-    // Fully preserved for the SVT Bake process
-    public void SetBlendMode(BlendModeConfig config) {
-        if (config != null) {
-            // We use YOUR ScriptableObject's built-in method!
-            config.SetBlendMode(inkLayerMaterial);
-            Debug.Log($"Blend mode set to {config.blendModeName}");
-            if (previewMaterial != null) config.SetBlendMode(previewMaterial);
+    public void ClearAllActiveLayers() {
+        foreach (var layer in layerPool) {
+            if (layer.isActive) {
+                ReleaseStrokeLayer(layer.strokeID);
+            }
         }
     }
 }

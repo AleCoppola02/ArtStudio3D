@@ -1,268 +1,364 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression; // Required for pure C# background zipping
+using System.IO.Compression;
+using System.Net;
 using System.Threading;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 public class GhostCanvas : MonoBehaviour
 {
-    private readonly object diskLock = new object();
+    private int activeReadbacks = 0;
 
     public class CrucibleState
     {
-        public RenderTexture rt;
-        public bool isDirty; // Has anyone drawn on this since the last readback request?
-        public int readbackVersion; // Which version of the tile are we currently on?
+        public RenderTexture documentRT;
+        public int readbackVersion;
     }
 
+    private ConcurrentDictionary<Vector3Int, byte> pendingDiskWrites = new ConcurrentDictionary<Vector3Int, byte>();
+    private Dictionary<Vector3Int, List<Vector2>> pendingTileJobs = new Dictionary<Vector3Int, List<Vector2>>();
+
+    private HashSet<Vector3Int> currentStrokeTiles = new HashSet<Vector3Int>();
+
+    private ConcurrentQueue<(Vector3Int address, byte[] data)> diskLoadQueue = new ConcurrentQueue<(Vector3Int, byte[])>();
+    private ConcurrentDictionary<Vector3Int, byte> pendingDiskReads = new ConcurrentDictionary<Vector3Int, byte>();
 
     private class StrokeCountdown { public int count; }
 
     [Header("Settings")]
     public int tileSize = 256;
     public string saveDirectory;
-    public int maxRamCacheSizeMB = 500; // Safety valve
+    public int maxRamCacheSizeMB = 500;
+    public int maxCruciblesPerFrame = 30;
+    [Header("Settings")]
 
-    // ==========================================
-    // 1. THE WAITING ROOM (Thread-Safe System RAM)
-    // ==========================================
-    // Key: Address (X, Y, ZoomLevel). Value: Compressed PNG bytes
+    [Header("References")]
+    public BackingStore backingStore;
+    public CanvasManager canvasManager;
+    public Material mipmapMaterial;
+
     private ConcurrentDictionary<Vector3Int, byte[]> ramCache = new ConcurrentDictionary<Vector3Int, byte[]>();
-
-
-    // Tiles currently being drawn on. Only accessed on Unity's Main Thread.
-    // Our new tracking dictionary
     private Dictionary<Vector3Int, CrucibleState> activeCrucibles = new Dictionary<Vector3Int, CrucibleState>();
-    private Material stampMaterial; // Material to draw the brush stamps
 
-    // ==========================================
-    // 3. THE FLUSHER (Background I/O Thread)
-    // ==========================================
+    private Material stampMaterial;
+    public Material mergeMaterial;
+    private RenderTexture scratchpadRT;
+
     private Thread ioThread;
     private bool isShuttingDown = false;
-    // A separate queue to know which tiles are oldest
     private ConcurrentQueue<(Vector3Int address, byte[] data)> flushQueue = new ConcurrentQueue<(Vector3Int, byte[])>();
+    Color32[] clearColors;
 
-    public void Initialize(Material brushMaterial, string saveDir) {
-        stampMaterial = brushMaterial;
+    public void Initialize(Material brushMat, Material inkMat, CanvasManager cm, string saveDir) {
+        clearColors = new Color32[tileSize * tileSize];
+
+        for (int i = 0; i < clearColors.Length; i++) {
+            clearColors[i] = new Color32(255, 255, 255, 255);
+        }
+
+        stampMaterial = brushMat;
+        mergeMaterial = inkMat;
+        canvasManager = cm;
         saveDirectory = saveDir;
-        if (!Directory.Exists(saveDirectory)) Directory.CreateDirectory(saveDirectory);
 
-        // Spin up the background hard drive flusher
+        if (Directory.Exists(saveDirectory)) {
+            Directory.Delete(saveDirectory, true);
+        }
+        Directory.CreateDirectory(saveDirectory);
+
+        // ALWAYS match ARGB32!
+        scratchpadRT = new RenderTexture(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
+        scratchpadRT.filterMode = FilterMode.Point;
+        scratchpadRT.Create();
+
         ioThread = new Thread(BackgroundFlusherLoop);
         ioThread.Priority = System.Threading.ThreadPriority.BelowNormal;
         ioThread.Start();
     }
 
-    // ==========================================
-    // THE ROUTER (Called by BackingStore.RequestTile)
-    // ==========================================
-    public byte[] TryGetTile(Vector3Int address) {
-        if (ramCache.TryGetValue(address, out byte[] data)) return data;
-
-        string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
-        if (File.Exists(path)) {
-            // No lock needed! The OS guarantees if the .dat file exists, it is whole.
-            byte[] compressedBytes;
-            try {
-                compressedBytes = File.ReadAllBytes(path);
-            }
-            catch (IOException) {
-                // In the astronomically rare 1-microsecond window where File.Move is swapping the file
-                // while we try to read it, just fail gracefully and let it load blank for one frame.
-                return null;
-            }
-
-            using (MemoryStream ms = new MemoryStream(compressedBytes))
-            using (DeflateStream ds = new DeflateStream(ms, CompressionMode.Decompress))
-            using (MemoryStream outMs = new MemoryStream()) {
-                ds.CopyTo(outMs);
-                return outMs.ToArray();
+    private void Update() {
+        while (diskLoadQueue.TryDequeue(out var loadedTile)) {
+            ramCache[loadedTile.address] = loadedTile.data;
+            if (backingStore != null) {
+                backingStore.OnChunkBaked(new HashSet<Vector3Int> { loadedTile.address }, -1, false);
             }
         }
-        return null;
-    }
-    // ==========================================
-    // THE BAKING FOUNDRY (Called by BackingStore queue)
-    // ==========================================
-    public void BakeStamps(List<Vector2> stamps, int layerID, BlendModeConfig blendMode, float brushSize) {
-        // 1. Setup the GPU Material
-        blendMode.SetBlendMode(stampMaterial);
 
-        // 2. THE SORTING BUCKETS (Now with Overlap!)
-        Dictionary<Vector3Int, List<Vector2>> groupedStamps = new Dictionary<Vector3Int, List<Vector2>>();
-        float radius = brushSize / 2f; // Assuming brushSize is a diameter
+        if (backingStore == null) return;
 
-        foreach (Vector2 stampPos in stamps) {
-            // Calculate the Bounding Box of the stamp in world coordinates
-            Vector2 minBounds = new Vector2(stampPos.x - radius, stampPos.y - radius);
-            Vector2 maxBounds = new Vector2(stampPos.x + radius, stampPos.y + radius);
+        StrokeBuffer stroke = backingStore.PeekNextStroke();
+        if (stroke == null) return;
 
-            // Find the minimum tile and maximum tile this rectangle touches
-            // (Assuming Z/ZoomLevel is 0 for the base canvas baking)
-            Vector3Int minTile = WorldToTileAddress(minBounds);
-            Vector3Int maxTile = WorldToTileAddress(maxBounds);
+        while (stroke.stampQueue.Count > 0) {
+            Vector2 stamp = stroke.stampQueue.Dequeue();
+            HashSet<Vector3Int> requiredTiles = CalculateTilesForStamp(stamp, stroke.brushSize);
 
-            // Add this stamp to EVERY tile it touches!
-            for (int tx = minTile.x; tx <= maxTile.x; tx++) {
-                for (int ty = minTile.y; ty <= maxTile.y; ty++) {
-                    Vector3Int overlapAddress = new Vector3Int(tx, ty, minTile.z);
-
-                    if (!groupedStamps.ContainsKey(overlapAddress)) {
-                        groupedStamps[overlapAddress] = new List<Vector2>();
-                    }
-                    groupedStamps[overlapAddress].Add(stampPos);
+            foreach (var t in requiredTiles) {
+                if (!pendingTileJobs.ContainsKey(t)) {
+                    pendingTileJobs[t] = new List<Vector2>();
                 }
+                pendingTileJobs[t].Add(stamp);
             }
         }
 
+        if (!stroke.isStrokeFinished) return;
 
-        // 3. THE OPTIMIZED BATCH DRAWING
-        foreach (var kvp in groupedStamps) {
+        if (pendingTileJobs.Count > 0) {
+            Dictionary<Vector3Int, List<Vector2>> chunkToBake = new Dictionary<Vector3Int, List<Vector2>>();
+            List<Vector3Int> keys = new List<Vector3Int>(pendingTileJobs.Keys);
+
+            int tilesToProcess = Mathf.Min(keys.Count, 10);
+
+            for (int i = 0; i < tilesToProcess; i++) {
+                Vector3Int tile = keys[i];
+                chunkToBake[tile] = pendingTileJobs[tile];
+                pendingTileJobs.Remove(tile);
+            }
+
+            ProcessTileBatch(chunkToBake, stroke);
+        }
+
+        bool isCompletelyDone = (stroke.stampQueue.Count == 0 &&
+                                 stroke.isStrokeFinished &&
+                                 pendingTileJobs.Count == 0 &&
+                                 activeReadbacks == 0);
+
+        if (isCompletelyDone) {
+            // 1. Copy the list of tiles so we can clear the global tracker immediately
+            HashSet<Vector3Int> tilesToMipmap = new HashSet<Vector3Int>(currentStrokeTiles);
+            currentStrokeTiles.Clear();
+
+            // 2. Tell the BackingStore to drop the stroke from the queue
+            backingStore.FinishCurrentStroke();
+
+            // 3. Kick off the Mipmap Chain! 
+            // We pass a callback so the UI Preview stays visible until the final Mipmap is safely on the disk!
+            GenerateMipmapsForStroke(tilesToMipmap, () => {
+                backingStore.OnChunkBaked(new HashSet<Vector3Int>(), stroke.strokeID, true);
+            });
+        }
+    }
+
+    private void ProcessTileBatch(Dictionary<Vector3Int, List<Vector2>> batch, StrokeBuffer stroke) {
+        stampMaterial.SetFloat("_Flow", stroke.flow);
+        if (stroke.blendMode != null) stroke.blendMode.SetBlendMode(mergeMaterial);
+        mergeMaterial.SetFloat("_Opacity", stroke.opacity);
+
+        float canvasWorldWidth = canvasManager.canvasWidthInTiles * canvasManager.worldUnitsPerTile;
+        float canvasWorldHeight = canvasManager.canvasHeightInTiles * canvasManager.worldUnitsPerTile;
+
+     
+        float halfBrush = (stroke.brushSize / canvasManager.worldUnitsPerTile) / 2f; 
+        int readbacksTriggered = 0;
+        HashSet<Vector3Int> touchedTiles = new HashSet<Vector3Int>();
+
+        foreach (var kvp in batch) {
             Vector3Int tileAddress = kvp.Key;
             List<Vector2> stampsForThisTile = kvp.Value;
 
-            // Fetch the state wrapper
             CrucibleState state = GetOrCreateCrucible(tileAddress);
 
-            // MARK AS DIRTY!
-            state.isDirty = true;
+            // ==========================================
+            // PASS 1: SCRATCHPAD
+            // ==========================================
+            RenderTexture.active = scratchpadRT;
+            GL.Clear(true, true, Color.clear);
+            GL.Viewport(new Rect(0, 0, tileSize, tileSize));
 
-            // BIND THE RENDER TEXTURE EXACTLY ONCE PER TILE!
-            RenderTexture.active = state.rt;
+            stampMaterial.SetPass(0);
+            GL.PushMatrix();
 
+          
+            GL.LoadOrtho(); 
+
+            GL.Begin(GL.QUADS);
+            foreach (Vector2 point in stampsForThisTile) {
+                // Convert world coordinates to local tile coordinates
+                float shiftedX = point.x + (canvasWorldWidth / 2f);
+                float shiftedY = point.y + (canvasWorldHeight / 2f);
+                // Calculate the world position of the tile's bottom-left corner
+                float tileWorldX = tileAddress.x * canvasManager.worldUnitsPerTile;
+                float tileWorldY = tileAddress.y * canvasManager.worldUnitsPerTile;
+                float localX = (shiftedX - tileWorldX) / canvasManager.worldUnitsPerTile;
+                float localY = (shiftedY - tileWorldY) / canvasManager.worldUnitsPerTile;
+                float xMin = localX - halfBrush;
+                float xMax = localX + halfBrush;
+                float yMin = localY - halfBrush;
+                float yMax = localY + halfBrush;
+
+                // FIX 1: Counter-Clockwise Winding Order so it doesn't get culled!
+                
+                GL.TexCoord2(0, 0); GL.Vertex3(xMin, yMin, 0); // Bottom-Left 
+                GL.TexCoord2(1, 0); GL.Vertex3(xMax, yMin, 0); // Bottom-Right 
+                GL.TexCoord2(1, 1); GL.Vertex3(xMax, yMax, 0); // Top-Right
+                GL.TexCoord2(0, 1); GL.Vertex3(xMin, yMax, 0); // Top-Left
+            }
+            GL.End();
+            GL.PopMatrix();
+            // at this point the scratchpadRT contains the blended result of all stamps that affect this tile, but it's not yet merged with the existing tile data in state.documentRT
+
+
+            // ==========================================
+            // PASS 2: MERGE TO PERMANENT TILE
+            // ==========================================
+            RenderTexture.active = state.documentRT;
+            GL.Viewport(new Rect(0, 0, tileSize, tileSize));
+            mergeMaterial.SetTexture("_MainTex", scratchpadRT);
+            mergeMaterial.SetPass(0);
+            
             GL.PushMatrix();
             GL.LoadOrtho();
-            stampMaterial.SetPass(0);
+            // FIX 2: Removed GL.LoadPixelMatrix(0, 1, 0, 1); which was squishing the quad
 
-            // Blast all the stamps for this tile in one go
-            foreach (Vector2 stampPos in stampsForThisTile) {
-                Vector2 localUV = GetLocalTileUV(stampPos, tileAddress);
-                DrawQuad(localUV);
-            }
-
+            GL.Begin(GL.QUADS);
+            // FIX 1: Counter-Clockwise Winding Order
+            GL.TexCoord2(0, 0); GL.Vertex3(0, 0, 0); // Bottom-Left
+            GL.TexCoord2(1, 0); GL.Vertex3(1, 0, 0); // Bottom-Right
+            GL.TexCoord2(1, 1); GL.Vertex3(1, 1, 0); // Top-Right
+            GL.TexCoord2(0, 1); GL.Vertex3(0, 1, 0); // Top-Left
+  
+            GL.End();
             GL.PopMatrix();
-        }
 
-        // Unbind at the very end
+
+            touchedTiles.Add(tileAddress);
+            currentStrokeTiles.Add(tileAddress);
+            readbacksTriggered++;
+        }
         RenderTexture.active = null;
-    }
 
-    // Track how many readbacks are currently happening for a specific layer
-    private Dictionary<int, int> pendingReadbacksPerLayer = new Dictionary<int, int>();
+        StrokeCountdown countdown = new StrokeCountdown { count = readbacksTriggered };
+        foreach (Vector3Int address in touchedTiles) {
+            CrucibleState state = activeCrucibles[address];
+            state.readbackVersion++;
+            activeReadbacks++;
 
-    public void FinalizeLayer(int layerID, System.Action onLayerFullyBaked) {
-        int dirtyCount = 0;
-
-        // 1. First pass to see how many tiles this specific stroke actually modified
-        foreach (var kvp in activeCrucibles) {
-            if (kvp.Value.isDirty) dirtyCount++;
-        }
-
-        if (dirtyCount == 0) {
-            onLayerFullyBaked?.Invoke();
-            return;
-        }
-
-        // 2. Create a dedicated countdown just for THIS stroke
-        StrokeCountdown countdown = new StrokeCountdown { count = dirtyCount };
-
-        // 3. Trigger the readbacks
-        foreach (var kvp in activeCrucibles) {
-            Vector3Int address = kvp.Key;
-            CrucibleState state = kvp.Value;
-
-            if (state.isDirty) {
-                state.isDirty = false;
-                state.readbackVersion++;
-                int versionForThisCallback = state.readbackVersion;
-
-                AsyncGPUReadback.Request(state.rt, 0, TextureFormat.RGBA32, (request) => {
-                    OnCrucibleReadbackComplete(request, address, state, versionForThisCallback, countdown, onLayerFullyBaked);
+            AsyncGPUReadback.Request(state.documentRT, 0, TextureFormat.ARGB32, (request) => {
+                activeReadbacks--;
+                OnCrucibleReadbackComplete(request, address, state, state.readbackVersion, countdown, () => {
+                    backingStore.OnChunkBaked(touchedTiles, stroke.strokeID, false);
                 });
+            });
+        }
+    }
+    private HashSet<Vector3Int> CalculateTilesForStamp(Vector2 stampPos, float brushSize) {
+        HashSet<Vector3Int> tiles = new HashSet<Vector3Int>();
+        float radius = brushSize / 2f;
+
+        Vector2Int min2D = canvasManager.WorldToTileCoordinate(new Vector2(stampPos.x - radius, stampPos.y - radius));
+        Vector2Int max2D = canvasManager.WorldToTileCoordinate(new Vector2(stampPos.x + radius, stampPos.y + radius));
+
+        for (int tx = min2D.x; tx <= max2D.x; tx++) {
+            for (int ty = min2D.y; ty <= max2D.y; ty++) {
+                tiles.Add(new Vector3Int(tx, ty, 0));
             }
         }
+        return tiles;
     }
 
     private void OnCrucibleReadbackComplete(AsyncGPUReadbackRequest request, Vector3Int address, CrucibleState state, int callbackVersion, StrokeCountdown countdown, System.Action onLayerFullyBaked) {
-        if (request.hasError) return;
-
-        // 1. Grab the RAW bytes directly from the GPU memory (Lightning fast)
-        var nativeArray = request.GetData<byte>();
-        byte[] rawBytes = nativeArray.ToArray(); // Instantly copy to normal C# array
-
-        // 2. Put it straight into the RAM Waiting Room!
-        ramCache[address] = rawBytes;
-        flushQueue.Enqueue(address);
-
-        // 3. INLINE BUBBLING (Async Mipmaps) placeholder...
-        // GenerateMipmapsAsync(address);
-
-        // SAFETY CHECK
-        if (!state.isDirty && state.readbackVersion == callbackVersion) {
-            RenderTexture.ReleaseTemporary(state.rt);
+        if (state.readbackVersion == callbackVersion) {
+            RenderTexture.ReleaseTemporary(state.documentRT);
             activeCrucibles.Remove(address);
         }
 
-        // THE ISOLATED HANDOFF COUNTDOWN
+        if (!request.hasError) {
+            var nativeArray = request.GetData<byte>();
+            byte[] rawBytes = nativeArray.ToArray();
+
+            // Note: ARGB32 might output with incorrect colors in PNG Debugging, but the internal Engine data is mathematically perfect now!
+            Texture2D debugTex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
+            debugTex.LoadRawTextureData(rawBytes);
+            File.WriteAllBytes(Path.Combine(saveDirectory, $"DEBUG_Tile_{address.z}_{address.x}_{address.y}.png"), debugTex.EncodeToPNG());
+            Destroy(debugTex);
+
+            ramCache[address] = rawBytes;
+            pendingDiskWrites.TryAdd(address, 1);
+            flushQueue.Enqueue((address, rawBytes));
+        }
+
         countdown.count--;
         if (countdown.count <= 0) {
             onLayerFullyBaked?.Invoke();
         }
     }
 
-    // ==========================================
-    // CRUCIBLE UTILITIES
-    // ==========================================
     private CrucibleState GetOrCreateCrucible(Vector3Int address) {
-        if (activeCrucibles.ContainsKey(address)) {
-            return activeCrucibles[address]; // It's already hot and ready!
-        }
+        if (activeCrucibles.ContainsKey(address)) return activeCrucibles[address];
 
-        // Create a temporary VRAM workspace
-        RenderTexture rt = RenderTexture.GetTemporary(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
-        rt.enableRandomWrite = true;
-        rt.filterMode = FilterMode.Point;
+        RenderTexture docRT = RenderTexture.GetTemporary(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
+         
+        docRT.filterMode = FilterMode.Point;
 
-        // Load the existing artwork into it before we start drawing
-        byte[] existingData = TryGetTile(address);
+        byte[] existingData = GetTileSynchronous(address);
         if (existingData != null) {
-            Texture2D tex = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false);
-
-            // Dump the raw bytes instantly
+            // CRITICAL FIX: Match Format!
+            Texture2D tex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
             tex.LoadRawTextureData(existingData);
-            tex.Apply(); // Must be applied for Graphics.Blit to see it
-
-            Graphics.Blit(tex, rt);
+            tex.Apply();
+            Graphics.Blit(tex, docRT);
             Destroy(tex);
         }
         else {
-            // It's a blank tile
-            RenderTexture.active = rt;
-            GL.Clear(true, true, Color.clear);
+            RenderTexture.active = docRT;
+            GL.Clear(true, true, Color.white);
             RenderTexture.active = null;
         }
 
-        // Wrap it in our new State Machine!
-        CrucibleState newState = new CrucibleState
-        {
-            rt = rt,
-            isDirty = false,
-            readbackVersion = 0
-        };
-
+        CrucibleState newState = new CrucibleState { documentRT = docRT, readbackVersion = 0 };
         activeCrucibles[address] = newState;
         return newState;
     }
 
-    // ==========================================
-    // THE BACKGROUND FLUSHER (Thread-Safe)
-    // ==========================================
+    public byte[] TryGetTileAsync(Vector3Int address) {
+        if (ramCache.TryGetValue(address, out byte[] data)) return data;
+
+        string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
+        if (File.Exists(path)) {
+            if (pendingDiskReads.TryAdd(address, 1)) {
+                System.Threading.Tasks.Task.Run(() => {
+                    try {
+                        byte[] compressedBytes = File.ReadAllBytes(path);
+                        using (MemoryStream ms = new MemoryStream(compressedBytes))
+                        using (DeflateStream ds = new DeflateStream(ms, CompressionMode.Decompress))
+                        using (MemoryStream outMs = new MemoryStream()) {
+                            ds.CopyTo(outMs);
+                            diskLoadQueue.Enqueue((address, outMs.ToArray()));
+                        }
+                    }
+                    catch { }
+                    finally { pendingDiskReads.TryRemove(address, out _); }
+                });
+            }
+        }
+        return null;
+    }
+
+    public byte[] GetTileSynchronous(Vector3Int address) {
+        if (ramCache.TryGetValue(address, out byte[] data)) return data;
+
+        string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
+        if (File.Exists(path)) {
+            try {
+                byte[] compressedBytes = File.ReadAllBytes(path);
+                using (MemoryStream ms = new MemoryStream(compressedBytes))
+                using (DeflateStream ds = new DeflateStream(ms, CompressionMode.Decompress))
+                using (MemoryStream outMs = new MemoryStream()) {
+                    ds.CopyTo(outMs);
+                    byte[] finalData = outMs.ToArray();
+                    ramCache[address] = finalData;
+                    return finalData;
+                }
+            }
+            catch { return null; }
+        }
+        return null;
+    }
+
     private void BackgroundFlusherLoop() {
         while (!isShuttingDown) {
-            // We now dequeue the whole task! We don't even need to ask the ramCache anymore!
             if (flushQueue.TryDequeue(out var task)) {
                 string finalPath = Path.Combine(saveDirectory, $"Tile_{task.address.z}_{task.address.x}_{task.address.y}.dat");
                 string tmpPath = finalPath + ".tmp";
@@ -272,57 +368,172 @@ public class GhostCanvas : MonoBehaviour
                     ds.Write(task.data, 0, task.data.Length);
                 }
 
-                if (File.Exists(finalPath)) {
-                    File.Replace(tmpPath, finalPath, null);
-                }
-                else {
-                    File.Move(tmpPath, finalPath);
-                }
+                if (File.Exists(finalPath)) File.Replace(tmpPath, finalPath, null);
+                else File.Move(tmpPath, finalPath);
+
+                pendingDiskWrites.TryRemove(task.address, out _);
             }
-            else {
-                Thread.Sleep(50);
-            }
+            else Thread.Sleep(50);
         }
     }
 
-    // ==========================================
-    // BACKING STORE UTILITIES
-    // ==========================================
     public void UploadBytesToVRAMSlot(byte[] data, Vector2Int slot, PhysicalAtlas atlas) {
-        Texture2D tempTex = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false);
-
-        // Dumps the raw bytes instantly instead of decoding a PNG
+        // CRITICAL FIX: Match Format!
+        Texture2D tempTex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
         tempTex.LoadRawTextureData(data);
+        tempTex.Apply();
 
         Graphics.CopyTexture(tempTex, 0, 0, 0, 0, tileSize, tileSize, atlas.Texture, 0, 0, slot.x * tileSize, slot.y * tileSize);
         Destroy(tempTex);
     }
 
     public void ClearVRAMSlot(Vector2Int slot, PhysicalAtlas atlas) {
-        // For performance, we create a tiny black texture and copy it over the slot
-        Texture2D blankTex = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false);
-        Color32[] clearColors = new Color32[tileSize * tileSize];
+        // CRITICAL FIX: Match Format!
+        Texture2D blankTex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
         blankTex.SetPixels32(clearColors);
         blankTex.Apply();
-
         Graphics.CopyTexture(blankTex, 0, 0, 0, 0, tileSize, tileSize, atlas.Texture, 0, 0, slot.x * tileSize, slot.y * tileSize);
         Destroy(blankTex);
     }
 
+    public void UnloadFromRAM(Vector3Int address) {
+        if (!pendingDiskWrites.ContainsKey(address)) {
+            ramCache.TryRemove(address, out _);
+        }
+    }
+
     private void OnDestroy() {
         isShuttingDown = true;
-        // In a real app, do a blocking flush of the queue here to ensure no data loss on exit!
-    
+        if (ioThread != null && ioThread.IsAlive) ioThread.Join(500);
+
+        if (scratchpadRT != null) {
+            scratchpadRT.Release();
+            Destroy(scratchpadRT);
+        }
     }
 
-    public void UnloadFromRAM(Vector3Int address) {
-        ramCache.TryRemove(address, out _);
+    private void OnApplicationQuit() {
+        if (!string.IsNullOrEmpty(saveDirectory) && Directory.Exists(saveDirectory)) {
+            try { Directory.Delete(saveDirectory, true); }
+            catch { }
+        }
+    }
+    // ==========================================
+    // MIPMAP GENERATOR
+    // ==========================================
+    public void GenerateMipmapsForStroke(HashSet<Vector3Int> modifiedLevel0Tiles, System.Action onFullyComplete) {
+        if (modifiedLevel0Tiles.Count == 0) {
+            onFullyComplete?.Invoke();
+            return;
+        }
+
+        // Start the async chain at Zoom Level 1
+        ProcessMipmapLevel(modifiedLevel0Tiles, 1, onFullyComplete);
     }
 
-    // Stub Helpers
-    public Vector3Int WorldToTileAddress(Vector2 pos) { return Vector3Int.zero; /* Implement based on CanvasConfig */ }
-    private Vector2 GetLocalTileUV(Vector2 pos, Vector3Int tile) { return Vector2.zero; /* Implement based on CanvasConfig */ }
-    private void DrawQuad(Vector2 centerUV) { /* Standard GL.Vertex3 Quad around center */ }
+    private void ProcessMipmapLevel(HashSet<Vector3Int> childTiles, int targetZ, System.Action onFullyComplete) {
+        int maxZoomLevel = canvasManager.tables.Length - 1;
 
+        // If we reached the end of the zoom levels, the whole chain is finished!
+        if (childTiles.Count == 0 || targetZ > maxZoomLevel) {
+            onFullyComplete?.Invoke();
+            return;
+        }
 
+        // Calculate which parents need to be baked
+        HashSet<Vector3Int> parentTiles = new HashSet<Vector3Int>();
+        foreach (var tile in childTiles) {
+            parentTiles.Add(new Vector3Int(Mathf.FloorToInt(tile.x / 2f), Mathf.FloorToInt(tile.y / 2f), targetZ));
+        }
+
+        int pendingBakes = parentTiles.Count;
+        if (pendingBakes == 0) {
+            onFullyComplete?.Invoke();
+            return;
+        }
+
+        // Bake each parent, and wait for ALL of their GPU readbacks to finish
+        foreach (var parent in parentTiles) {
+            BakeMipmapTile(parent, () => {
+                pendingBakes--;
+
+                // Once the last parent finishes, recursively trigger the NEXT zoom level!
+                if (pendingBakes <= 0) {
+                    ProcessMipmapLevel(parentTiles, targetZ + 1, onFullyComplete);
+                }
+            });
+        }
+    }
+
+    private void BakeMipmapTile(Vector3Int parentAddress, System.Action onTileReadbackComplete) {
+        RenderTexture mipmapRT = RenderTexture.GetTemporary(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
+        RenderTexture.active = mipmapRT;
+
+        // Background must be white paper!
+        GL.Clear(true, true, Color.white);
+
+        for (int i = 0; i < 4; i++) {
+            // Find the physical coordinate of the 4 children
+            int cx = parentAddress.x * 2 + (i % 2);
+            int cy = parentAddress.y * 2 + (i / 2);
+            Vector3Int childAddress = new Vector3Int(cx, cy, parentAddress.z - 1);
+
+            // Because of our async chain, this is now 100% guaranteed to exist in RAM!
+            byte[] childData = GetTileSynchronous(childAddress);
+            if (childData != null) {
+                Texture2D tex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
+                tex.LoadRawTextureData(childData);
+                //tex.filterMode = FilterMode.Bilinear; // Smooth scaling
+                tex.Apply();
+
+                mipmapMaterial.SetTexture("_MainTex", tex);
+                mipmapMaterial.SetPass(0);
+
+                // Math: i=0 is BL, i=1 is BR, i=2 is TL, i=3 is TR
+                // We map this directly to 0.0 -> 1.0 Ortho space
+                float xMin = (i % 2) * 0.5f;
+                float yMin = (i / 2) * 0.5f;
+                float xMax = xMin + 0.5f;
+                float yMax = yMin + 0.5f;
+
+                GL.PushMatrix();
+                GL.LoadOrtho();
+                GL.Begin(GL.QUADS);
+
+                // Exact same CCW winding order we proved works for Level 0!
+                GL.TexCoord2(0, 0); GL.Vertex3(xMin, yMin, 0); // Bottom-Left
+                GL.TexCoord2(1, 0); GL.Vertex3(xMax, yMin, 0); // Bottom-Right
+                GL.TexCoord2(1, 1); GL.Vertex3(xMax, yMax, 0); // Top-Right
+                GL.TexCoord2(0, 1); GL.Vertex3(xMin, yMax, 0); // Top-Left
+
+                GL.End();
+                GL.PopMatrix();
+
+            }
+        }
+        RenderTexture.active = null;
+
+        activeReadbacks++;
+        AsyncGPUReadback.Request(mipmapRT, 0, TextureFormat.ARGB32, (request) => {
+            activeReadbacks--;
+            RenderTexture.ReleaseTemporary(mipmapRT);
+
+            if (!request.hasError) {
+                byte[] data = request.GetData<byte>().ToArray();
+                ramCache[parentAddress] = data;
+                pendingDiskWrites.TryAdd(parentAddress, 1);
+                flushQueue.Enqueue((parentAddress, data));
+                // Note: ARGB32 might output with incorrect colors in PNG Debugging, but the internal Engine data is mathematically perfect now!
+                Texture2D debugTex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
+                debugTex.LoadRawTextureData(data);
+                File.WriteAllBytes(Path.Combine(saveDirectory, $"DEBUG_Tile_{parentAddress.z}_{parentAddress.x}_{parentAddress.y}.png"), debugTex.EncodeToPNG());
+                Destroy(debugTex);
+                // Instantly update VRAM if the camera is currently looking at this mipmap!
+                backingStore?.OnChunkBaked(new HashSet<Vector3Int> { parentAddress }, -1, false);
+            }
+
+            // Trigger the async chain progression!
+            onTileReadbackComplete?.Invoke();
+        });
+    }
 }

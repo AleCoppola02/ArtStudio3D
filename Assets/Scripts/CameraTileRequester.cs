@@ -70,6 +70,7 @@ public class CameraTileRequester : MonoBehaviour
         float minWorldY = camPos.y - (camHeight / 2f);
         float maxWorldY = camPos.y + (camHeight / 2f);
 
+        // Convert those world coordinates to tile coordinates at the current zoom level
         Vector2Int minTile = canvas.WorldToTileCoordinate(new Vector2(minWorldX, minWorldY), currentZoomLevel);
         Vector2Int maxTile = canvas.WorldToTileCoordinate(new Vector2(maxWorldX, maxWorldY), currentZoomLevel);
 
@@ -79,8 +80,7 @@ public class CameraTileRequester : MonoBehaviour
                 canvas.backingStore.RequestTile(x, y, currentZoomLevel);
             }
         }
-
+        Debug.Log($"Requested tiles from ({minTile.x}, {minTile.y}) to ({maxTile.x}, {maxTile.y}) at zoom level {currentZoomLevel}");
         canvas.backingStore.SyncGPU();
-        Debug.Log("current zoom level: " + currentZoomLevel + " | requesting tiles from (" + minTile.x + "," + minTile.y + ") to (" + maxTile.x + "," + maxTile.y + ")");
     }
 }

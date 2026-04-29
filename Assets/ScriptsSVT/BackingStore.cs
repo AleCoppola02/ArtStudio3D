@@ -3,19 +3,26 @@ using System.IO;
 using UnityEngine;
 
 // 1. THE NEW STROKE BUFFER CLASS
-// Holds a queue of stamps for a specific ink layer until they are baked.
 public class StrokeBuffer
 {
-    public int inkLayerID;
+    public int documentLayerID; // The permanent SVT layer we are drawing onto
+    public int strokeID;        // The temporary UI layer ID
+    
     public BlendModeConfig blendMode;
-    public float brushSize; // NEW: Track the size!
+    public float brushSize; 
+    public float opacity;       // NEW: Track stroke opacity
+    public float flow;          // NEW: Track brush flow
+
     public Queue<Vector2> stampQueue = new Queue<Vector2>();
     public bool isStrokeFinished = false;
 
-    public StrokeBuffer(int layerID, BlendModeConfig mode, float size) {
-        inkLayerID = layerID;
+    public StrokeBuffer(int docLayerID, int strkID, BlendModeConfig mode, float size, float op, float fl) {
+        documentLayerID = docLayerID;
+        strokeID = strkID;
         blendMode = mode;
         brushSize = size;
+        opacity = op;
+        flow = fl;
     }
 }
 
@@ -25,13 +32,11 @@ public class BackingStore
     // THE HANDOFF SYSTEM
     // ==========================================
     
-    // Your InkLayerManager will subscribe to this event to know when to clear the UI
-    public event System.Action<int> OnLayerBakingFinished;
+    // InkLayerManager will subscribe to this to know when to clear the UI
+    public event System.Action<int> OnLayerBakingFinished; // Now passes the temporary StrokeID!
 
-
-    private HashSet<Vector3Int> currentlyBakingTiles = new HashSet<Vector3Int>();
     // --- CORE COMPONENTS ---
-    private GhostCanvas ghostCanvas; // The new VRAM Crucible & RAM Manager
+    private GhostCanvas ghostCanvas; 
     private PhysicalAtlas atlas;
     private IndirectionTable[] indirectionTables;
 
@@ -42,10 +47,8 @@ public class BackingStore
     private string saveDirectory;
 
     // --- BAKING QUEUE ---
-    private Queue<StrokeBuffer> pendingStrokes = new Queue<StrokeBuffer>(); // Each item is a full stroke's worth of stamps for a specific ink layer, waiting to be baked.
-    private StrokeBuffer processingStroke = null; // Used by ProcessBakingQueue (Reader)
-    private StrokeBuffer receivingStroke = null;  // Used by EnqueueStamps (Writer)
-    private int stampsPerFrame = 500; // Engine processing budget
+    private Queue<StrokeBuffer> pendingStrokes = new Queue<StrokeBuffer>(); 
+    private StrokeBuffer receivingStroke = null;  
 
     public BackingStore(PhysicalAtlas atlas, IndirectionTable[] indirectionTables, GhostCanvas ghostCanvas, string saveDirectory) {
         this.atlas = atlas;
@@ -57,67 +60,32 @@ public class BackingStore
     // ==========================================
     // 1. THE BAKING PIPELINE (Called by BrushManager)
     // ==========================================
-    public void EnqueueStamps(int layerID, BlendModeConfig blendMode, float brushSize, List<Vector2> newStamps) {
-        if (receivingStroke == null || receivingStroke.inkLayerID != layerID || receivingStroke.isStrokeFinished) {
-            receivingStroke = new StrokeBuffer(layerID, blendMode, brushSize); // Pass it in!
+    
+    public void EnqueueStamps(int documentLayerID, int strokeID, BlendModeConfig blendMode, float brushSize, float opacity, float flow, List<Vector2> newStamps) {
+        // If there is no active stroke OR the IDs don't match OR the last one finished, make a new buffer!
+        if (receivingStroke == null || receivingStroke.strokeID != strokeID || receivingStroke.isStrokeFinished) {
+            receivingStroke = new StrokeBuffer(documentLayerID, strokeID, blendMode, brushSize, opacity, flow);
             pendingStrokes.Enqueue(receivingStroke);
         }
 
-        // 2. Add the new stamps to the active writing buffer
+        // Add the streamed real-time stamps to the active writing buffer
         foreach (var stamp in newStamps) {
             receivingStroke.stampQueue.Enqueue(stamp); 
         }
     }
 
-    public void EndStroke(int layerID) {
-        // Mark the currently writing stroke as finished so the next brush touch creates a new queue item
-        if (receivingStroke != null && receivingStroke.inkLayerID == layerID) {
+    public void EndStroke(int strokeID) {
+        // Mark the currently writing stroke as finished.
+        // BrushManager tells us when the user lifted the pen!
+        if (receivingStroke != null && receivingStroke.strokeID == strokeID) {
             receivingStroke.isStrokeFinished = true;
         }
     }
 
-    // Call this from a MonoBehaviour Update() or CanvasManager
-    public void ProcessBakingQueue() {
-        // 1. Get the next stroke to process
-        if (processingStroke == null) {
-            if (pendingStrokes.Count > 0) processingStroke = pendingStrokes.Dequeue();
-            else return; // Completely idle! 
-        }
-
-        // 2. Pop our budget of stamps
-        List<Vector2> batchToBake = new List<Vector2>();
-        int count = 0;
-
-        while (processingStroke.stampQueue.Count > 0 && count < stampsPerFrame) {
-            Vector2 stamp = processingStroke.stampQueue.Dequeue();
-            batchToBake.Add(stamp);
-            // Track roughly which tiles are being touched (assuming LOD 0)
-            currentlyBakingTiles.Add(ghostCanvas.WorldToTileAddress(stamp));
-            count++;
-        }
-
-        // 3. Send to the Crucible!
-        if (batchToBake.Count > 0) {
-            ghostCanvas.BakeStamps(batchToBake, processingStroke.inkLayerID, processingStroke.blendMode, processingStroke.brushSize);
-        }
-
-        // 4. Is this stroke completely done sending stamps to the GPU?
-        if (processingStroke.stampQueue.Count == 0 && processingStroke.isStrokeFinished) {
-            int finishedLayerID = processingStroke.inkLayerID;
-            HashSet<Vector3Int> tilesToRefresh = new HashSet<Vector3Int>(currentlyBakingTiles); // Copy the list
-            currentlyBakingTiles.Clear();
-
-            ghostCanvas.FinalizeLayer(finishedLayerID, () => {
-                RefreshVisibleTiles(tilesToRefresh); // ONLY refresh these!
-                OnLayerBakingFinished?.Invoke(finishedLayerID);
-            });
-            processingStroke = null;
-        }
-    }
     private void RefreshVisibleTiles(HashSet<Vector3Int> modifiedTiles) {
         foreach (TileState tile in activeTiles) {
-            if (modifiedTiles.Contains(tile.Address)) { // <--- THE CRITICAL CHECK
-                byte[] latestData = ghostCanvas.TryGetTile(tile.Address);
+            if (modifiedTiles.Contains(tile.Address)) { 
+                byte[] latestData = ghostCanvas.TryGetTileAsync(tile.Address);
                 if (latestData != null) UploadToAtlasSlot(latestData, tile.PhysicalSlot);
             }
         }
@@ -148,11 +116,9 @@ public class BackingStore
         }
 
         // 2. THE FALLBACK LOOKUP
-        // Ask GhostCanvas first (RAM), fallback to Disk
-        byte[] pixelData = ghostCanvas.TryGetTile(address);
-        if (pixelData == null) {
-            pixelData = LoadFromDisk(address);
-        }
+        // GhostCanvas handles both RAM and Disk lookups (and decompression) for us!
+        byte[] pixelData = ghostCanvas.TryGetTileAsync(address);
+
 
         // 3. Upload to Physical Atlas
         if (pixelData != null) {
@@ -200,13 +166,7 @@ public class BackingStore
     // 4. DISK & UTILS
     // ==========================================
 
-    private byte[] LoadFromDisk(Vector3Int address) {
-        string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
-        if (File.Exists(path)) {
-            return File.ReadAllBytes(path);
-        }
-        return null;
-    }
+
 
     // We will define this helper later. It just converts byte[] to a Temp Texture2D 
     // and uses Graphics.CopyTexture to put it in the correct atlas slot.
@@ -217,5 +177,35 @@ public class BackingStore
     private void UploadBlankToAtlasSlot(Vector2Int slot) {
         // Just clear that specific block of the RenderTexture
         ghostCanvas.ClearVRAMSlot(slot, atlas);
+    }
+
+    // Allow GhostCanvas to look at the current stroke without removing it
+    public StrokeBuffer PeekNextStroke() {
+        if (pendingStrokes.Count > 0) {
+            return pendingStrokes.Peek();
+        }
+        return null;
+    }
+
+    // Allow GhostCanvas to tell BackingStore when a stroke is fully processed
+    public void FinishCurrentStroke() {
+        if (pendingStrokes.Count > 0) {
+            pendingStrokes.Dequeue();
+        }
+    }
+
+    // GhostCanvas will call this when a chunk finishes baking!
+    public void OnChunkBaked(HashSet<Vector3Int> modifiedTiles, int layerID, bool isStrokeCompletelyDone) {
+        RefreshVisibleTiles(modifiedTiles);
+
+        if (isStrokeCompletelyDone) {
+            OnLayerBakingFinished?.Invoke(layerID);
+        }
+    }
+
+    public void SyncGPU() {
+        for (int i = 0; i < indirectionTables.Length; i++) {
+            indirectionTables[i].ApplyChanges();
+        }
     }
 }

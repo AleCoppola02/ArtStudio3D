@@ -42,6 +42,8 @@ public class PencilPainter : MonoBehaviour
 
         // --- NEW: Dynamic Brush Resizing via Hotkeys ---
         HandleBrushSizeHotkeys();
+
+        HandleZoom();
     }
 
     // Handles drawing with the left mouse button, including click, drag, release, and pause states.
@@ -180,12 +182,27 @@ public class PencilPainter : MonoBehaviour
 
     }
 
+    private void HandleZoom() {
+        float scrollDelta = 0;
+        if(Input.GetKeyDown(KeyCode.W)) {
+            scrollDelta = 0.1f;
+        }
+        else if(Input.GetKeyDown(KeyCode.S)) {
+            scrollDelta = -0.1f;
+        }
+        if(scrollDelta != 0) {
+            ZoomCamera(scrollDelta);
+        }
+
+    }
+
     //Handle using the mousewheel to zoom and pan the camera, keeping the cursor anchored to the same world position under the mouse.
     private void HandleMouseWheel() {
-        // 1. GetMouseButtonDown(2) is true ONLY on the first frame the left click is pressed.
+
         // We use this to lock in the starting position so the camera doesn't jump.
         // (Use 1 for right-click, 2 for middle-click).
-        if (Input.GetMouseButtonDown(2)) {
+        // you can also zoom with w and s
+        if (Input.GetMouseButtonDown(2) ) {
             previousMousePosition = Input.mousePosition;
         }
 
@@ -214,29 +231,32 @@ public class PencilPainter : MonoBehaviour
         float scrollDelta = Input.GetAxis("Mouse ScrollWheel");
 
         if (Mathf.Abs(scrollDelta) > 0f) {
-            // 1. Get world position under the mouse BEFORE the zoom
-            // ScreenToWorldPoint translates screen pixels to world coordinates based on current zoom
-            Vector3 mouseWorldPosBeforeZoom = cam.ScreenToWorldPoint(Input.mousePosition);
-
-            // 2. Adjust the zoom level
-            // We subtract because scrolling up (positive) should zoom IN (smaller orthographic size)
-            cam.orthographicSize -= cam.orthographicSize * scrollDelta * zoomSpeed;
-
-            // Clamp it so we don't invert the camera or zoom out to infinity
-            cam.orthographicSize = Mathf.Clamp(cam.orthographicSize, minZoom, maxZoom);
-
-            // 3. Get the new world position under the mouse AFTER the zoom
-            Vector3 mouseWorldPosAfterZoom = cam.ScreenToWorldPoint(Input.mousePosition);
-
-            // 4. Calculate how much the world "slipped" away from the cursor
-            Vector3 difference = mouseWorldPosBeforeZoom - mouseWorldPosAfterZoom;
-
-            // 5. Shift the camera by that difference to keep the cursor anchored
-            // We ensure Z stays at 0 so we don't accidentally push the camera forward/backward
-            cam.transform.position += new Vector3(difference.x, difference.y, 0f);
+            ZoomCamera(scrollDelta);
         }
     }
 
+    private void ZoomCamera(float scrollDelta) {
+        // 1. Get world position under the mouse BEFORE the zoom
+        // ScreenToWorldPoint translates screen pixels to world coordinates based on current zoom
+        Vector3 mouseWorldPosBeforeZoom = cam.ScreenToWorldPoint(Input.mousePosition);
+
+        // 2. Adjust the zoom level
+        // We subtract because scrolling up (positive) should zoom IN (smaller orthographic size)
+        cam.orthographicSize -= cam.orthographicSize * scrollDelta * zoomSpeed;
+
+        // Clamp it so we don't invert the camera or zoom out to infinity
+        cam.orthographicSize = Mathf.Clamp(cam.orthographicSize, minZoom, maxZoom);
+
+        // 3. Get the new world position under the mouse AFTER the zoom
+        Vector3 mouseWorldPosAfterZoom = cam.ScreenToWorldPoint(Input.mousePosition);
+
+        // 4. Calculate how much the world "slipped" away from the cursor
+        Vector3 difference = mouseWorldPosBeforeZoom - mouseWorldPosAfterZoom;
+
+        // 5. Shift the camera by that difference to keep the cursor anchored
+        // We ensure Z stays at 0 so we don't accidentally push the camera forward/backward
+        cam.transform.position += new Vector3(difference.x, difference.y, 0f);
+    }
     
     bool GetHitUV(out Vector2 uv) {
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);

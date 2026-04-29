@@ -16,9 +16,11 @@ Shader "Painting/InkLayer"
         ZWrite Off
         // Safe transparent rendering tags
         Tags { "RenderType"="Transparent" "Queue"="Transparent" }
+        Cull Off
+        ZTest Always
         
         Blend [_SrcBlendColor] [_DstBlendColor], [_SrcBlendAlpha] [_DstBlendAlpha]
-
+        
         Pass
         {
             CGPROGRAM

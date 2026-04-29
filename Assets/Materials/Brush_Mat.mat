@@ -103,7 +103,7 @@ Material:
     - _DstBlendAlpha: 10
     - _DstBlendColor: 10
     - _EnvironmentReflections: 1
-    - _Flow: 0.41
+    - _Flow: 0.15
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0

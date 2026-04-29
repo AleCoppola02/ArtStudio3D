@@ -20,7 +20,7 @@ Shader "Painting/TextureBrush"
         // Ignores the scene depth entirely
         ZWrite Off
         ZTest Always
-        Cull Back
+        Cull Off
 
 
         Blend [_SrcBlendColor] [_DstBlendColor], [_SrcBlendAlpha] [_DstBlendAlpha]

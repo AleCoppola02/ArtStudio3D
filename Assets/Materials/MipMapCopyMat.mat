@@ -7,8 +7,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: LivePreview_Mat
-  m_Shader: {fileID: 4800000, guid: 02e584a7a0556314fae135ce27a9ff96, type: 3}
+  m_Name: MipMapCopyMat
+  m_Shader: {fileID: 4800000, guid: 98bca04ced9a78b4b94953f3e67f76f5, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -28,12 +28,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
-    m_Floats:
-    - _DstBlendAlpha: 10
-    - _DstBlendColor: 10
-    - _Opacity: 1
-    - _SrcBlendAlpha: 2
-    - _SrcBlendColor: 2
+    m_Floats: []
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1
