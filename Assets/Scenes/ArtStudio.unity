@@ -634,7 +634,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   sliderManagerUI: {fileID: 0}
   brush: {fileID: 1814169578}
-  inkLayer: {fileID: 1091343047}
   cam: {fileID: 330585545}
   zoomSpeed: 3
   minZoom: 0.00001
@@ -994,8 +993,8 @@ MonoBehaviour:
   dropdown: {fileID: 258574485}
   brushManager: {fileID: 1814169578}
   availableModes:
-  - {fileID: 11400000, guid: a5139dc25b336954984eef7a5a5959c4, type: 2}
   - {fileID: 11400000, guid: 69daf92a0d624cf47a691bf5feb5adfc, type: 2}
+  - {fileID: 11400000, guid: a5139dc25b336954984eef7a5a5959c4, type: 2}
   - {fileID: 11400000, guid: 064be113431753144b0a746e9c87f244, type: 2}
 --- !u!114 &258574485
 MonoBehaviour:
@@ -1048,13 +1047,13 @@ MonoBehaviour:
   m_MultiSelect: 0
   m_Options:
     m_Options:
-    - m_Text: Normal
-      m_Image: {fileID: 0}
-      m_Color: {r: 1, g: 1, b: 1, a: 1}
     - m_Text: Additive
       m_Image: {fileID: 0}
       m_Color: {r: 1, g: 1, b: 1, a: 1}
     - m_Text: Multiply
+      m_Image: {fileID: 0}
+      m_Color: {r: 1, g: 1, b: 1, a: 1}
+    - m_Text: Normal
       m_Image: {fileID: 0}
       m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_OnValueChanged:
@@ -3263,6 +3262,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Canvas
   tileSize: 256
   worldUnitsPerTile: 1
+  maxVisiblePixels: 30000
   tileRequester: {fileID: 330585548}
   svtCanvasMaterial: {fileID: 2100000, guid: 2d32f37e5827beb4db446f1f23df6f90, type: 2}
   ghostCanvas: {fileID: 2093584103}
@@ -4206,7 +4206,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Normal
+  m_text: Additive
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -4865,11 +4865,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 034c2700813496a48b42f76e4f8df7b2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  sizeMode: 0
   brushMaterial: {fileID: 2100000, guid: 9d774e1eccd61824a90a85fa4786370b, type: 2}
   currentBlendMode: {fileID: 11400000, guid: 69daf92a0d624cf47a691bf5feb5adfc, type: 2}
   brushSizeUI: 50
   brushColor: {r: 0, g: 0, b: 0, a: 1}
+  flow: 1
+  opacity: 1
   spacingFactor: 0.05
   cam: {fileID: 330585545}
   inkLayerManager: {fileID: 1091343047}

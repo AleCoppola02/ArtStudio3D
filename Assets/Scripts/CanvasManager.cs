@@ -5,18 +5,21 @@ public class CanvasManager : MonoBehaviour
 {
     [Header("SVT Settings")]
     public int tileSize = 256;
-    public float worldUnitsPerTile = 1f; 
+    public float worldUnitsPerTile = 1f;
+
+    // ---> NEW: The absolute maximum resolution the camera is allowed to see <---
+    public float maxVisiblePixels = 30000f;
+
     [Header("References")]
     public CameraTileRequester tileRequester;
     public Material svtCanvasMaterial;
-    public GhostCanvas ghostCanvas;         // NEW: The Background Baker
-    public InkLayerManager inkLayerManager; // NEW: To hook up the events
+    public GhostCanvas ghostCanvas;
+    public InkLayerManager inkLayerManager;
     public Material inkLayerMaterial;
-    // The SVT "Mathematical Canvas" bounds
+
     [HideInInspector] public int canvasWidthInTiles = 8;
     [HideInInspector] public int canvasHeightInTiles = 8;
 
-    // The Engine Core
     public PhysicalAtlas atlas;
     public IndirectionTable[] tables;
     public BackingStore backingStore;
@@ -27,7 +30,6 @@ public class CanvasManager : MonoBehaviour
         float requestedWidth = CanvasConfig.Width;
         float requestedHeight = CanvasConfig.Height;
 
-        // CRITICAL FIX: The internal SVT Canvas must perfectly align with the whole-number tile grid!
         canvasWidthInTiles = Mathf.CeilToInt(requestedWidth / tileSize);
         canvasHeightInTiles = Mathf.CeilToInt(requestedHeight / tileSize);
 
@@ -36,9 +38,18 @@ public class CanvasManager : MonoBehaviour
 
         transform.localScale = new Vector3(widthInWorldUnits, heightInWorldUnits, 1f);
 
-        // 2. Calculate Mipmap Levels
+        // ==========================================
+        // CRITICAL FIX: CAP MIPMAP LEVELS TO 30,000px!
+        // ==========================================
         int maxDim = Mathf.Max(canvasWidthInTiles, canvasHeightInTiles);
-        int numMipmapLevels = Mathf.FloorToInt(Mathf.Log(maxDim, 2)) + 1;
+
+        // Find how many tiles 30,000 pixels equals
+        int maxAllowedDim = Mathf.CeilToInt(maxVisiblePixels / tileSize);
+
+        // Take the smaller of the two. A 100k canvas gets capped; an 8k canvas stays 8k.
+        int effectiveMaxDim = Mathf.Min(maxDim, maxAllowedDim);
+
+        int numMipmapLevels = Mathf.FloorToInt(Mathf.Log(effectiveMaxDim, 2)) + 1;
 
         // 3. Initialize VRAM Resources
         atlas = new PhysicalAtlas(4096, tileSize);
@@ -48,15 +59,18 @@ public class CanvasManager : MonoBehaviour
         RenderTexture.active = null;
 
         tables = new IndirectionTable[numMipmapLevels];
+        int currentWidth = canvasWidthInTiles;
+        int currentHeight = canvasHeightInTiles;
+
         for (int z = 0; z < numMipmapLevels; z++) {
-            // CRITICAL FIX: Use CeilToInt with Pow so odds don't get truncated!
+            // Use precise Pow rounding so edge-tiles aren't lost
             int w = Mathf.CeilToInt(canvasWidthInTiles / Mathf.Pow(2, z));
             int h = Mathf.CeilToInt(canvasHeightInTiles / Mathf.Pow(2, z));
             tables[z] = new IndirectionTable(z, w, h);
         }
 
         // 4. Initialize the Background Workers
-        string saveDir = System.IO.Path.Combine(Application.persistentDataPath, "SVT_Cache");
+        string saveDir = Path.Combine(Application.persistentDataPath, "SVT_Cache");
 
         backingStore = new BackingStore(atlas, tables, ghostCanvas, saveDir);
 
@@ -77,18 +91,38 @@ public class CanvasManager : MonoBehaviour
             svtCanvasMaterial.SetFloat("_AtlasSlotsAcross", atlas.AtlasSize / (float)tileSize);
         }
 
-        // Frame the exact requested size (so the extra padding tiles hang off-screen naturally)
+        // ==========================================
+        // CAMERA ZOOM & FRAMING LOGIC
+        // ==========================================
         float exactRequestedWorldWidth = (requestedWidth / tileSize) * worldUnitsPerTile;
         float exactRequestedWorldHeight = (requestedHeight / tileSize) * worldUnitsPerTile;
-        FrameCanvasPerfectly(exactRequestedWorldWidth, exactRequestedWorldHeight);
+        float maxAllowedWorldUnits = (maxVisiblePixels / tileSize) * worldUnitsPerTile;
+
+        PencilPainter painter = FindObjectOfType<PencilPainter>();
+        if (painter != null) {
+            // ALWAYS allow zooming out to maxVisiblePixels (e.g., 30,000px), 
+            // completely regardless of how small the actual canvas is!
+            float maxOrthoHeight = maxAllowedWorldUnits / 2f;
+            float maxOrthoWidth = (maxAllowedWorldUnits / 2f) / Camera.main.aspect;
+
+            // This safely overrides PencilPainter's Max Zoom slider
+            painter.maxZoom = Mathf.Max(maxOrthoHeight, maxOrthoWidth) * 1.05f;
+        }
+
+        // When the game starts, frame the camera to fit the actual Canvas size so you aren't lost in the void.
+        // (But if the canvas is 100k, frame it at the 30k limit instead)
+        float startHeight = Mathf.Min(exactRequestedWorldHeight, maxAllowedWorldUnits);
+        float startWidth = Mathf.Min(exactRequestedWorldWidth, maxAllowedWorldUnits);
+
+        FrameCanvasPerfectly(startWidth, startHeight);
 
         if (tileRequester != null) tileRequester.Initialize();
     }
+
     public Vector2Int WorldToTileCoordinate(Vector2 worldPos, int zoomLevel = 0) {
         float scaleMultiplier = Mathf.Pow(2, zoomLevel);
         float currentUnitsPerTile = worldUnitsPerTile * scaleMultiplier;
 
-        // CRITICAL FIX: Match the exact math of the Table Generator!
         int currentWidthInTiles = Mathf.CeilToInt(canvasWidthInTiles / scaleMultiplier);
         int currentHeightInTiles = Mathf.CeilToInt(canvasHeightInTiles / scaleMultiplier);
 

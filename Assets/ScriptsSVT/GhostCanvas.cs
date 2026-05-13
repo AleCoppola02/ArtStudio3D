@@ -135,7 +135,8 @@ public class GhostCanvas : MonoBehaviour
 
             // 3. Kick off the Mipmap Chain! 
             // We pass a callback so the UI Preview stays visible until the final Mipmap is safely on the disk!
-            GenerateMipmapsForStroke(tilesToMipmap, () => {
+            GenerateMipmapsForStroke(tilesToMipmap, () =>
+            {
                 backingStore.OnChunkBaked(new HashSet<Vector3Int>(), stroke.strokeID, true);
             });
         }
@@ -149,8 +150,8 @@ public class GhostCanvas : MonoBehaviour
         float canvasWorldWidth = canvasManager.canvasWidthInTiles * canvasManager.worldUnitsPerTile;
         float canvasWorldHeight = canvasManager.canvasHeightInTiles * canvasManager.worldUnitsPerTile;
 
-     
-        float halfBrush = (stroke.brushSize / canvasManager.worldUnitsPerTile) / 2f; 
+
+        float halfBrush = (stroke.brushSize / canvasManager.worldUnitsPerTile) / 2f;
         int readbacksTriggered = 0;
         HashSet<Vector3Int> touchedTiles = new HashSet<Vector3Int>();
 
@@ -170,8 +171,8 @@ public class GhostCanvas : MonoBehaviour
             stampMaterial.SetPass(0);
             GL.PushMatrix();
 
-          
-            GL.LoadOrtho(); 
+
+            GL.LoadOrtho();
 
             GL.Begin(GL.QUADS);
             foreach (Vector2 point in stampsForThisTile) {
@@ -189,7 +190,7 @@ public class GhostCanvas : MonoBehaviour
                 float yMax = localY + halfBrush;
 
                 // FIX 1: Counter-Clockwise Winding Order so it doesn't get culled!
-                
+
                 GL.TexCoord2(0, 0); GL.Vertex3(xMin, yMin, 0); // Bottom-Left 
                 GL.TexCoord2(1, 0); GL.Vertex3(xMax, yMin, 0); // Bottom-Right 
                 GL.TexCoord2(1, 1); GL.Vertex3(xMax, yMax, 0); // Top-Right
@@ -207,7 +208,7 @@ public class GhostCanvas : MonoBehaviour
             GL.Viewport(new Rect(0, 0, tileSize, tileSize));
             mergeMaterial.SetTexture("_MainTex", scratchpadRT);
             mergeMaterial.SetPass(0);
-            
+
             GL.PushMatrix();
             GL.LoadOrtho();
             // FIX 2: Removed GL.LoadPixelMatrix(0, 1, 0, 1); which was squishing the quad
@@ -218,7 +219,7 @@ public class GhostCanvas : MonoBehaviour
             GL.TexCoord2(1, 0); GL.Vertex3(1, 0, 0); // Bottom-Right
             GL.TexCoord2(1, 1); GL.Vertex3(1, 1, 0); // Top-Right
             GL.TexCoord2(0, 1); GL.Vertex3(0, 1, 0); // Top-Left
-  
+
             GL.End();
             GL.PopMatrix();
 
@@ -235,9 +236,11 @@ public class GhostCanvas : MonoBehaviour
             state.readbackVersion++;
             activeReadbacks++;
 
-            AsyncGPUReadback.Request(state.documentRT, 0, TextureFormat.ARGB32, (request) => {
+            AsyncGPUReadback.Request(state.documentRT, 0, TextureFormat.ARGB32, (request) =>
+            {
                 activeReadbacks--;
-                OnCrucibleReadbackComplete(request, address, state, state.readbackVersion, countdown, () => {
+                OnCrucibleReadbackComplete(request, address, state, state.readbackVersion, countdown, () =>
+                {
                     backingStore.OnChunkBaked(touchedTiles, stroke.strokeID, false);
                 });
             });
@@ -282,7 +285,7 @@ public class GhostCanvas : MonoBehaviour
         if (activeCrucibles.ContainsKey(address)) return activeCrucibles[address];
 
         RenderTexture docRT = RenderTexture.GetTemporary(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
-         
+
         docRT.filterMode = FilterMode.Point;
 
         byte[] existingData = GetTileSynchronous(address);
@@ -311,7 +314,8 @@ public class GhostCanvas : MonoBehaviour
         string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
         if (File.Exists(path)) {
             if (pendingDiskReads.TryAdd(address, 1)) {
-                System.Threading.Tasks.Task.Run(() => {
+                System.Threading.Tasks.Task.Run(() =>
+                {
                     try {
                         byte[] compressedBytes = File.ReadAllBytes(path);
                         using (MemoryStream ms = new MemoryStream(compressedBytes))
@@ -427,32 +431,44 @@ public class GhostCanvas : MonoBehaviour
     private void ProcessMipmapLevel(HashSet<Vector3Int> childTiles, int targetZ, System.Action onFullyComplete) {
         int maxZoomLevel = canvasManager.tables.Length - 1;
 
-        // If we reached the end of the zoom levels, the whole chain is finished!
         if (childTiles.Count == 0 || targetZ > maxZoomLevel) {
             onFullyComplete?.Invoke();
             return;
         }
 
-        // Calculate which parents need to be baked
-        HashSet<Vector3Int> parentTiles = new HashSet<Vector3Int>();
+        // 1. Gather all unique parent tiles
+        HashSet<Vector3Int> uniqueParents = new HashSet<Vector3Int>();
         foreach (var tile in childTiles) {
-            parentTiles.Add(new Vector3Int(Mathf.FloorToInt(tile.x / 2f), Mathf.FloorToInt(tile.y / 2f), targetZ));
+            uniqueParents.Add(new Vector3Int(Mathf.FloorToInt(tile.x / 2f), Mathf.FloorToInt(tile.y / 2f), targetZ));
         }
 
-        int pendingBakes = parentTiles.Count;
-        if (pendingBakes == 0) {
-            onFullyComplete?.Invoke();
+        // Convert to a List so we can process them in batches by index
+        List<Vector3Int> parentList = new List<Vector3Int>(uniqueParents);
+
+        // 2. Start baking this level in safe batches!
+        BakeMipmapBatch(parentList, 0, targetZ, onFullyComplete);
+    }
+
+    private void BakeMipmapBatch(List<Vector3Int> parentTiles, int startIndex, int targetZ, System.Action onFullyComplete) {
+        if (startIndex >= parentTiles.Count) {
+            // This zoom level is 100% finished! Move up to the next zoom level.
+            ProcessMipmapLevel(new HashSet<Vector3Int>(parentTiles), targetZ + 1, onFullyComplete);
             return;
         }
 
-        // Bake each parent, and wait for ALL of their GPU readbacks to finish
-        foreach (var parent in parentTiles) {
-            BakeMipmapTile(parent, () => {
+        // CRITICAL FIX: Only bake 10 mipmaps at a time to prevent GPU TDR crashes
+        int batchSize = 10;
+        int endIndex = Mathf.Min(startIndex + batchSize, parentTiles.Count);
+        int pendingBakes = endIndex - startIndex;
+
+        for (int i = startIndex; i < endIndex; i++) {
+            BakeMipmapTile(parentTiles[i], () =>
+            {
                 pendingBakes--;
 
-                // Once the last parent finishes, recursively trigger the NEXT zoom level!
+                // Once this batch finishes downloading from the GPU, trigger the next batch!
                 if (pendingBakes <= 0) {
-                    ProcessMipmapLevel(parentTiles, targetZ + 1, onFullyComplete);
+                    BakeMipmapBatch(parentTiles, endIndex, targetZ, onFullyComplete);
                 }
             });
         }
@@ -461,29 +477,23 @@ public class GhostCanvas : MonoBehaviour
     private void BakeMipmapTile(Vector3Int parentAddress, System.Action onTileReadbackComplete) {
         RenderTexture mipmapRT = RenderTexture.GetTemporary(tileSize, tileSize, 0, RenderTextureFormat.ARGB32);
         RenderTexture.active = mipmapRT;
-
-        // Background must be white paper!
         GL.Clear(true, true, Color.white);
 
         for (int i = 0; i < 4; i++) {
-            // Find the physical coordinate of the 4 children
             int cx = parentAddress.x * 2 + (i % 2);
             int cy = parentAddress.y * 2 + (i / 2);
             Vector3Int childAddress = new Vector3Int(cx, cy, parentAddress.z - 1);
 
-            // Because of our async chain, this is now 100% guaranteed to exist in RAM!
             byte[] childData = GetTileSynchronous(childAddress);
             if (childData != null) {
                 Texture2D tex = new Texture2D(tileSize, tileSize, TextureFormat.ARGB32, false);
                 tex.LoadRawTextureData(childData);
-                //tex.filterMode = FilterMode.Bilinear; // Smooth scaling
+                tex.filterMode = FilterMode.Bilinear;
                 tex.Apply();
 
                 mipmapMaterial.SetTexture("_MainTex", tex);
                 mipmapMaterial.SetPass(0);
 
-                // Math: i=0 is BL, i=1 is BR, i=2 is TL, i=3 is TR
-                // We map this directly to 0.0 -> 1.0 Ortho space
                 float xMin = (i % 2) * 0.5f;
                 float yMin = (i / 2) * 0.5f;
                 float xMax = xMin + 0.5f;
@@ -492,22 +502,21 @@ public class GhostCanvas : MonoBehaviour
                 GL.PushMatrix();
                 GL.LoadOrtho();
                 GL.Begin(GL.QUADS);
-
-                // Exact same CCW winding order we proved works for Level 0!
-                GL.TexCoord2(0, 0); GL.Vertex3(xMin, yMin, 0); // Bottom-Left
-                GL.TexCoord2(1, 0); GL.Vertex3(xMax, yMin, 0); // Bottom-Right
-                GL.TexCoord2(1, 1); GL.Vertex3(xMax, yMax, 0); // Top-Right
-                GL.TexCoord2(0, 1); GL.Vertex3(xMin, yMax, 0); // Top-Left
-
+                GL.TexCoord2(0, 0); GL.Vertex3(xMin, yMin, 0);
+                GL.TexCoord2(1, 0); GL.Vertex3(xMax, yMin, 0);
+                GL.TexCoord2(1, 1); GL.Vertex3(xMax, yMax, 0);
+                GL.TexCoord2(0, 1); GL.Vertex3(xMin, yMax, 0);
                 GL.End();
                 GL.PopMatrix();
 
+                Destroy(tex);
             }
         }
         RenderTexture.active = null;
 
         activeReadbacks++;
-        AsyncGPUReadback.Request(mipmapRT, 0, TextureFormat.ARGB32, (request) => {
+        AsyncGPUReadback.Request(mipmapRT, 0, TextureFormat.ARGB32, (request) =>
+        {
             activeReadbacks--;
             RenderTexture.ReleaseTemporary(mipmapRT);
 
@@ -517,11 +526,9 @@ public class GhostCanvas : MonoBehaviour
                 pendingDiskWrites.TryAdd(parentAddress, 1);
                 flushQueue.Enqueue((parentAddress, data));
 
-                // Instantly update VRAM if the camera is currently looking at this mipmap!
                 backingStore?.OnChunkBaked(new HashSet<Vector3Int> { parentAddress }, -1, false);
             }
 
-            // Trigger the async chain progression!
             onTileReadbackComplete?.Invoke();
         });
     }

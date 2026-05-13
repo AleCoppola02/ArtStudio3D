@@ -32,8 +32,8 @@ Material:
     - _DstBlendAlpha: 10
     - _DstBlendColor: 10
     - _Opacity: 1
-    - _SrcBlendAlpha: 2
-    - _SrcBlendColor: 2
+    - _SrcBlendAlpha: 1
+    - _SrcBlendColor: 1
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1

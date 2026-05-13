@@ -6,9 +6,9 @@ Shader "Painting/InkLayer"
         _CanvasTex("Canvas Texture", 2D) = "white" {}
         _Opacity ("Opacity", Range(0,1)) = 0.5
         // Expose Source and Destination Blend Modes to the inspector/code
-        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendColor ("Source Blend Color", Float) = 5 // SrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendColor ("Source Blend Color", Float) = 1 // SrcAlpha
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlendColor ("Destination Blend Color", Float) = 10 // OneMinusSrcAlpha
-        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendAlpha ("Source Blend Alpha", Float) = 5 // SrcAlpha
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlendAlpha ("Source Blend Alpha", Float) = 1 // SrcAlpha
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlendAlpha ("Destination Blend Alpha", Float) = 10 // OneMinusSrcAlpha
     }
     SubShader

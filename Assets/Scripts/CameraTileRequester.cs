@@ -37,7 +37,8 @@ public class CameraTileRequester : MonoBehaviour
 
         int maxZoomAllowed = canvas.tables.Length - 1;
         int currentZoomLevel = Mathf.Clamp(desiredZoom, 0, maxZoomAllowed);
-
+        //log the max zoom and current zoom
+        Debug.Log($"Max Zoom Allowed: {maxZoomAllowed}, Desired Zoom: {desiredZoom}, Current Zoom Level: {currentZoomLevel}");
         // =======================
         // --- SHADER UPDATE ---
         // =======================
