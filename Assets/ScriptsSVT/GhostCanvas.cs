@@ -79,10 +79,15 @@ public class GhostCanvas : MonoBehaviour
     }
 
     private void Update() {
+
         while (diskLoadQueue.TryDequeue(out var loadedTile)) {
+            // A tile finished loading from the hard drive
+            //diskLoadQueue handles the camera panning case where we need to load new tiles into the VRAM Atlas
+            //so we want to push it to the backing store immediately instead of waiting for a stroke to trigger a refresh
             ramCache[loadedTile.address] = loadedTile.data;
             if (backingStore != null) {
-                backingStore.OnChunkBaked(new HashSet<Vector3Int> { loadedTile.address }, -1, false);
+                // Instantly push it to the VRAM Atlas so the camera sees it
+                backingStore.RefreshVisibleTiles(new HashSet<Vector3Int> { loadedTile.address });
             }
         }
 
@@ -418,7 +423,7 @@ public class GhostCanvas : MonoBehaviour
     // ==========================================
     // MIPMAP GENERATOR
     // ==========================================
-    public void GenerateMipmapsForStroke(HashSet<Vector3Int> modifiedLevel0Tiles, System.Action onFullyComplete) {
+    public void GenerateMipmapsForStroke(HashSet<Vector3Int> modifiedLevel0Tiles, System.Action onFullyComplete) { 
         if (modifiedLevel0Tiles.Count == 0) {
             onFullyComplete?.Invoke();
             return;
@@ -436,7 +441,7 @@ public class GhostCanvas : MonoBehaviour
             return;
         }
 
-        // 1. Gather all unique parent tiles
+        // Gather all unique parent tiles
         HashSet<Vector3Int> uniqueParents = new HashSet<Vector3Int>();
         foreach (var tile in childTiles) {
             uniqueParents.Add(new Vector3Int(Mathf.FloorToInt(tile.x / 2f), Mathf.FloorToInt(tile.y / 2f), targetZ));
@@ -445,18 +450,18 @@ public class GhostCanvas : MonoBehaviour
         // Convert to a List so we can process them in batches by index
         List<Vector3Int> parentList = new List<Vector3Int>(uniqueParents);
 
-        // 2. Start baking this level in safe batches!
+        // Start baking this level in safe batches
         BakeMipmapBatch(parentList, 0, targetZ, onFullyComplete);
     }
 
     private void BakeMipmapBatch(List<Vector3Int> parentTiles, int startIndex, int targetZ, System.Action onFullyComplete) {
         if (startIndex >= parentTiles.Count) {
-            // This zoom level is 100% finished! Move up to the next zoom level.
+            // This zoom level is 100% finished. Move up to the next zoom level.
             ProcessMipmapLevel(new HashSet<Vector3Int>(parentTiles), targetZ + 1, onFullyComplete);
             return;
         }
 
-        // CRITICAL FIX: Only bake 10 mipmaps at a time to prevent GPU TDR crashes
+        //Only bake 10 mipmaps at a time to prevent GPU TDR crashes
         int batchSize = 10;
         int endIndex = Mathf.Min(startIndex + batchSize, parentTiles.Count);
         int pendingBakes = endIndex - startIndex;
@@ -466,7 +471,7 @@ public class GhostCanvas : MonoBehaviour
             {
                 pendingBakes--;
 
-                // Once this batch finishes downloading from the GPU, trigger the next batch!
+                // Once this batch finishes downloading from the GPU, trigger the next batch
                 if (pendingBakes <= 0) {
                     BakeMipmapBatch(parentTiles, endIndex, targetZ, onFullyComplete);
                 }

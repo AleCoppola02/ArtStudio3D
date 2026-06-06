@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-// 1. THE NEW STROKE BUFFER CLASS
+
 public class StrokeBuffer
 {
     public int documentLayerID; // The permanent SVT layer we are drawing onto
@@ -28,12 +28,9 @@ public class StrokeBuffer
 
 public class BackingStore
 {
-    // ==========================================
-    // THE HANDOFF SYSTEM
-    // ==========================================
-    
+
     // InkLayerManager will subscribe to this to know when to clear the UI
-    public event System.Action<int> OnLayerBakingFinished; // Now passes the temporary StrokeID!
+    public event System.Action<int> OnLayerBakingFinished; 
 
     // --- CORE COMPONENTS ---
     private GhostCanvas ghostCanvas; 
@@ -62,7 +59,7 @@ public class BackingStore
     // ==========================================
     
     public void EnqueueStamps(int documentLayerID, int strokeID, BlendModeConfig blendMode, float brushSize, float opacity, float flow, List<Vector2> newStamps) {
-        // If there is no active stroke OR the IDs don't match OR the last one finished, make a new buffer!
+        // If there is no active stroke OR the IDs don't match OR the last one finished, make a new buffer
         if (receivingStroke == null || receivingStroke.strokeID != strokeID || receivingStroke.isStrokeFinished) {
             receivingStroke = new StrokeBuffer(documentLayerID, strokeID, blendMode, brushSize, opacity, flow);
             pendingStrokes.Enqueue(receivingStroke);
@@ -82,7 +79,7 @@ public class BackingStore
         }
     }
 
-    private void RefreshVisibleTiles(HashSet<Vector3Int> modifiedTiles) {
+    public void RefreshVisibleTiles(HashSet<Vector3Int> modifiedTiles) {
         foreach (TileState tile in activeTiles) {
             if (modifiedTiles.Contains(tile.Address)) { 
                 byte[] latestData = ghostCanvas.TryGetTileAsync(tile.Address);
@@ -105,22 +102,22 @@ public class BackingStore
         TileState tile = tileDatabase[address];
         tile.LastAccessTime = accessCounter++;
 
-        // If it's already in VRAM, do nothing!
+        // If it's already in VRAM, do nothing
         if (tile.IsLoaded) return;
 
-        // 1. Get an empty VRAM slot
+        //Get an empty VRAM slot
         Vector2Int? slot = atlas.AllocateSlot();
         if (slot == null) {
             EvictOldestTile();
             slot = atlas.AllocateSlot();
         }
 
-        // 2. THE FALLBACK LOOKUP
-        // GhostCanvas handles both RAM and Disk lookups (and decompression) for us!
+
+        // GhostCanvas handles both RAM and Disk lookups (and decompression)
         byte[] pixelData = ghostCanvas.TryGetTileAsync(address);
 
 
-        // 3. Upload to Physical Atlas
+        // Upload to Physical Atlas
         if (pixelData != null) {
             UploadToAtlasSlot(pixelData, slot.Value);
         }
@@ -128,7 +125,7 @@ public class BackingStore
             UploadBlankToAtlasSlot(slot.Value); // Completely empty area
         }
 
-        // 4. Update the Indirection Table
+        //Update the Indirection Table
         tile.PhysicalSlot = slot.Value;
         tile.IsLoaded = true;
         activeTiles.Add(tile);
@@ -137,27 +134,24 @@ public class BackingStore
     }
 
     // ==========================================
-    // 3. CLEAN EVICTION (No saving needed!)
+    // 3. CLEAN EVICTION (No saving needed)
     // ==========================================
 
     private void EvictOldestTile() {
         if (activeTiles.Count == 0) return;
-
         TileState oldestTile = activeTiles[0];
         for (int i = 1; i < activeTiles.Count; i++) {
             if (activeTiles[i].LastAccessTime < oldestTile.LastAccessTime) {
                 oldestTile = activeTiles[i];
             }
         }
-
-        // 1. Just clear the pointer! GhostCanvas/Disk holds the real data now.
+        //Clear the pointer. GhostCanvas/Disk holds the real data now.
         indirectionTables[oldestTile.Address.z].ClearTileMapping(oldestTile.Address.x, oldestTile.Address.y);
-
-        // 2. Free up VRAM
+        // Free up VRAM
         atlas.FreeSlot(oldestTile.PhysicalSlot);
         oldestTile.IsLoaded = false;
         activeTiles.Remove(oldestTile);
-        // 3. Free up System RAM!
+        //Free up System RAM
         ghostCanvas.UnloadFromRAM(oldestTile.Address);
 
     }
@@ -168,8 +162,7 @@ public class BackingStore
 
 
 
-    // We will define this helper later. It just converts byte[] to a Temp Texture2D 
-    // and uses Graphics.CopyTexture to put it in the correct atlas slot.
+
     private void UploadToAtlasSlot(byte[] data, Vector2Int slot) {
         ghostCanvas.UploadBytesToVRAMSlot(data, slot, atlas);
     }
@@ -194,7 +187,7 @@ public class BackingStore
         }
     }
 
-    // GhostCanvas will call this when a chunk finishes baking!
+    // GhostCanvas will call this when a chunk finishes baking
     public void OnChunkBaked(HashSet<Vector3Int> modifiedTiles, int layerID, bool isStrokeCompletelyDone) {
         RefreshVisibleTiles(modifiedTiles);
 

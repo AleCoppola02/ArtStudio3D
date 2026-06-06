@@ -6,11 +6,11 @@ Shader "Hidden/SVT_MipmapCopy"
     }
     SubShader
     {
-        // No culling or depth reading, just raw 2D pixel copying
-        Cull Off ZWrite Off ZTest Always
+        Cull Off 
+        ZWrite Off 
+        ZTest Always
         
-        // "One Zero" means: Final Pixel = (Source * 1) + (Destination * 0)
-        // This guarantees an exact 1:1 copy of both Color and Alpha!
+        // Exact 1:1 overwrite
         Blend One Zero 
 
         Pass
@@ -31,6 +31,10 @@ Shader "Hidden/SVT_MipmapCopy"
             };
 
             sampler2D _MainTex;
+            
+            // Unity automatically populates this variable!
+            // x = 1/width, y = 1/height
+            float4 _MainTex_TexelSize; 
 
             v2f vert (appdata_t v)
             {
@@ -42,7 +46,17 @@ Shader "Hidden/SVT_MipmapCopy"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                return tex2D(_MainTex, i.texcoord);
+                // Find the exact distance to move half-a-pixel diagonally
+                float2 halfTexel = _MainTex_TexelSize.xy * 0.5;
+                
+                // Sample the exact centers of the 4 corresponding high-res pixels
+                float4 c1 = tex2D(_MainTex, i.texcoord + float2(-halfTexel.x, -halfTexel.y)); // Bottom-Left
+                float4 c2 = tex2D(_MainTex, i.texcoord + float2( halfTexel.x, -halfTexel.y)); // Bottom-Right
+                float4 c3 = tex2D(_MainTex, i.texcoord + float2(-halfTexel.x,  halfTexel.y)); // Top-Left
+                float4 c4 = tex2D(_MainTex, i.texcoord + float2( halfTexel.x,  halfTexel.y)); // Top-Right
+                
+                // Add them together and divide by 4 for a mathematically perfect average!
+                return (c1 + c2 + c3 + c4) * 0.25;
             }
             ENDCG
         }

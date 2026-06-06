@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 public class PhysicalAtlas : System.IDisposable
 {
-    // The massive VRAM canvas
+    // The  VRAM canvas
     public RenderTexture Texture { get; private set; }
     public int TileSize { get; private set; }
     public int AtlasSize { get; private set; }
@@ -19,7 +19,7 @@ public class PhysicalAtlas : System.IDisposable
         // ARGB32 gives us standard color channels.
         Texture = new RenderTexture(AtlasSize, AtlasSize, 0, RenderTextureFormat.ARGB32);
 
-        // CRITICAL: If you are drawing onto this with Compute Shaders or Pixel Shaders, 
+        // For drawing onto this with Compute Shaders or Pixel Shaders, 
         // you often need this flag enabled so the GPU can write to it directly.
         Texture.enableRandomWrite = true;
 
@@ -27,7 +27,7 @@ public class PhysicalAtlas : System.IDisposable
         Texture.filterMode = FilterMode.Point;
         Texture.Create();
 
-        // 2. Initialize the Parking Lot tracking
+        //Initialize the slot tracking
         int slotsAcross = AtlasSize / TileSize;
         freeSlots = new Queue<Vector2Int>();
 
@@ -45,7 +45,7 @@ public class PhysicalAtlas : System.IDisposable
             return freeSlots.Dequeue(); // Hand out an empty slot
         }
 
-        // If the queue is empty, the VRAM Atlas is 100% full!
+        // If the queue is empty, the VRAM Atlas is 100% full
         return null;
     }
 
@@ -54,12 +54,12 @@ public class PhysicalAtlas : System.IDisposable
         freeSlots.Enqueue(slot); // Put the slot back in the pool
     }
 
-    // Inside PhysicalAtlas.cs
+    
 public void Dispose()
 {
     if (Texture != null) {
         Texture.Release();
-        Object.Destroy(Texture); // Use UnityEngine.Object
+        Object.Destroy(Texture); 
     }
 }
 }

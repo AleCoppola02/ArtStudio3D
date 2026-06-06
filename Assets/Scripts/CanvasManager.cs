@@ -26,6 +26,8 @@ public class CanvasManager : MonoBehaviour
     public BrushManager brushManager;
 
     private void Start() {
+        transform.position = Vector3.zero;
+
         // 1. Calculate the physical size of the canvas
         float requestedWidth = CanvasConfig.Width;
         float requestedHeight = CanvasConfig.Height;
