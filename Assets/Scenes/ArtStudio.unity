@@ -5490,10 +5490,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 49ded18229ccd0e4aa93f3801fe3cb80, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GhostCanvas
+  processLimitPerFrame: 10
   tileSize: 256
   saveDirectory: 
-  maxRamCacheSizeMB: 500
-  maxCruciblesPerFrame: 30
   canvasManager: {fileID: 1102848067}
   mipmapMaterial: {fileID: 2100000, guid: 939af5054fe564249891624cc6a69c0d, type: 2}
   mergeMaterial: {fileID: 0}

@@ -53,7 +53,7 @@ public class SliderManagerUI : MonoBehaviour
     }
 
     public void SetInkLayerOpacityUI(float opacity) {
-        inkLayer.SetOpacity(opacity / 100f);
+        brush.opacity = (opacity / 100f);
         opacityText.text = $"{(int)opacity}%";
 
         currentOpacity = opacity;

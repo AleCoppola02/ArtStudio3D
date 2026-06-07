@@ -16,8 +16,8 @@ public class PhysicalAtlas : System.IDisposable
         TileSize = tileSize;
 
         // 1. Create the RenderTexture
-        // ARGB32 gives us standard color channels.
-        Texture = new RenderTexture(AtlasSize, AtlasSize, 0, RenderTextureFormat.ARGB32);
+        // ARGBFloat gives us standard color channels.
+        Texture = new RenderTexture(AtlasSize, AtlasSize, 0, RenderTextureFormat.ARGBFloat);
 
         // For drawing onto this with Compute Shaders or Pixel Shaders, 
         // you often need this flag enabled so the GPU can write to it directly.

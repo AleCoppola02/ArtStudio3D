@@ -2,7 +2,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems; // <--- REQUIRED FOR UI DETECTION
 
-public class PencilPainter : MonoBehaviour
+public class InputHandler : MonoBehaviour
 {
     [SerializeField] private SliderManagerUI sliderManagerUI;
 

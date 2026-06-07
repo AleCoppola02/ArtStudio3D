@@ -100,14 +100,14 @@ public class CanvasManager : MonoBehaviour
         float exactRequestedWorldHeight = (requestedHeight / tileSize) * worldUnitsPerTile;
         float maxAllowedWorldUnits = (maxVisiblePixels / tileSize) * worldUnitsPerTile;
 
-        PencilPainter painter = FindObjectOfType<PencilPainter>();
+        InputHandler painter = FindObjectOfType<InputHandler>();
         if (painter != null) {
             // ALWAYS allow zooming out to maxVisiblePixels (e.g., 30,000px), 
             // completely regardless of how small the actual canvas is!
             float maxOrthoHeight = maxAllowedWorldUnits / 2f;
             float maxOrthoWidth = (maxAllowedWorldUnits / 2f) / Camera.main.aspect;
 
-            // This safely overrides PencilPainter's Max Zoom slider
+            // This safely overrides InputHandler's Max Zoom slider
             painter.maxZoom = Mathf.Max(maxOrthoHeight, maxOrthoWidth) * 1.05f;
         }
 

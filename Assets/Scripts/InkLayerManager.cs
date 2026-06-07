@@ -55,7 +55,7 @@ public class InkLayerManager : MonoBehaviour
             if (!layer.isActive) {
                 if (layer.rt.width != rtWidth || layer.rt.height != rtHeight) {
                     layer.rt.Release();
-                    layer.rt = new RenderTexture(rtWidth, rtHeight, 0, RenderTextureFormat.ARGB32);
+                    layer.rt = new RenderTexture(rtWidth, rtHeight, 0, RenderTextureFormat.ARGBFloat);
                     layer.rt.filterMode = FilterMode.Point;
                     layer.rt.Create();
                     layer.uiMaterialInstance.SetTexture("_MainTex", layer.rt);
@@ -66,7 +66,7 @@ public class InkLayerManager : MonoBehaviour
 
         PreviewLayer newLayer = new PreviewLayer();
         
-        newLayer.rt = new RenderTexture(rtWidth, rtHeight, 0, RenderTextureFormat.ARGB32);
+        newLayer.rt = new RenderTexture(rtWidth, rtHeight, 0, RenderTextureFormat.ARGBFloat);
         newLayer.rt.filterMode = FilterMode.Point;
         newLayer.rt.Create();
 
