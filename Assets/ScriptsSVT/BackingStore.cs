@@ -28,6 +28,7 @@ public class StrokeBuffer
 
 public class BackingStore
 {
+    public CameraTileRequester requester; // Reference to the requester that created this stroke, so we can notify it when done
 
     // InkLayerManager will subscribe to this to know when to clear the UI
     public event System.Action<int> OnLayerBakingFinished; 
@@ -52,6 +53,7 @@ public class BackingStore
         this.indirectionTables = indirectionTables;
         this.ghostCanvas = ghostCanvas;
         this.saveDirectory = saveDirectory;
+        this.requester = null; // Will be set externally after creation
     }
 
     // ==========================================
@@ -193,6 +195,14 @@ public class BackingStore
 
         if (isStrokeCompletelyDone) {
             OnLayerBakingFinished?.Invoke(layerID);
+            requester.RequestVisibleTiles();
+        }
+    }
+
+    // This allows the camera to try fetching the file again instead of it being permanently white.
+    public void MarkTileAsUnloaded(Vector3Int address) {
+        if (tileDatabase.TryGetValue(address, out TileState tile)) {
+            tile.IsLoaded = false;
         }
     }
 

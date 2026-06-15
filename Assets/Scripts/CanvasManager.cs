@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
@@ -40,9 +41,7 @@ public class CanvasManager : MonoBehaviour
 
         transform.localScale = new Vector3(widthInWorldUnits, heightInWorldUnits, 1f);
 
-        // ==========================================
-        // CRITICAL FIX: CAP MIPMAP LEVELS TO 30,000px!
-        // ==========================================
+        //cap mipmap levels to 30000 pixels at once
         int maxDim = Mathf.Max(canvasWidthInTiles, canvasHeightInTiles);
 
         // Find how many tiles 30,000 pixels equals
@@ -119,6 +118,7 @@ public class CanvasManager : MonoBehaviour
         FrameCanvasPerfectly(startWidth, startHeight);
 
         if (tileRequester != null) tileRequester.Initialize();
+        backingStore.requester = tileRequester;
     }
 
     public Vector2Int WorldToTileCoordinate(Vector2 worldPos, int zoomLevel = 0) {
@@ -155,5 +155,23 @@ public class CanvasManager : MonoBehaviour
         if (backingStore != null) {
             backingStore.OnLayerBakingFinished -= inkLayerManager.ReleaseStrokeLayer;
         }
+    }
+
+    public void UpdateSvtShader(int currentZoomLevel, float virtualWidth, float virtualHeight) {
+        IndirectionTable currentTable = tables[currentZoomLevel];
+        svtCanvasMaterial.SetTexture("_IndirectionTable", currentTable.TableTexture);
+        svtCanvasMaterial.SetVector("_TableSize", new Vector4(virtualWidth, virtualHeight, 0, 0));
+        svtCanvasMaterial.SetVector("_TableResolution", new Vector4(currentTable.Width, currentTable.Height, 0, 0));
+    }
+
+
+    public void RequestTiles(Vector2Int minTile, Vector2Int maxTile, int currentZoomLevel) {
+        // This is called by CameraTileRequester when it wants to load new tiles into VRAM
+        for (int x = minTile.x; x <= maxTile.x; x++) {
+            for (int y = minTile.y; y <= maxTile.y; y++) {
+                backingStore.RequestTile(x, y, currentZoomLevel);
+            }
+        }
+        backingStore.SyncGPU();
     }
 }

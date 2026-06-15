@@ -5,7 +5,7 @@ using UnityEngine.EventSystems; // <--- REQUIRED FOR UI DETECTION
 public class InputHandler : MonoBehaviour
 {
     [SerializeField] private SliderManagerUI sliderManagerUI;
-
+    public CameraTileRequester requester; 
     private Vector2 lastWorldPos;
     private Plane canvasPlane = new Plane(Vector3.forward, Vector3.zero);
 
@@ -16,7 +16,7 @@ public class InputHandler : MonoBehaviour
 
     private float stationaryTimer = 0f;
     private bool isStationaryPaused = false;
-    private const float PAUSE_THRESHOLD = 0.15f;
+    private const float PAUSE_THRESHOLD = 0.4f;
 
     // ---> NEW: Tracks if the current click started on a UI element <---
     private bool isPointerOverUI = false;
@@ -69,19 +69,20 @@ public class InputHandler : MonoBehaviour
             }
             else {
                 // --- DRAGGING ---
-                if (stationaryTimer >= PAUSE_THRESHOLD) {
+                if (stationaryTimer >= PAUSE_THRESHOLD) {              
                     if (!isStationaryPaused) {
+
                         brush.PauseStroke(currentWorldPos);
                     }
                     isStationaryPaused = true;
                     dragState = DragState.Paused;
                 }
 
-                if (Vector3.Distance(Input.mousePosition, previousMousePosition) < 0.1f) {
+                if (Vector3.Distance(Input.mousePosition, previousMousePosition) < 0.001f) {
                     stationaryTimer += Time.deltaTime;
                     if (stationaryTimer >= PAUSE_THRESHOLD) {
-                        isStationaryPaused = true;
-                        dragState = DragState.Paused;
+                        //isStationaryPaused = true;
+                        //dragState = DragState.Paused;
                     }
                 }
                 else {
@@ -152,6 +153,8 @@ public class InputHandler : MonoBehaviour
 
             cam.transform.position += new Vector3(difference.x, difference.y, 0f);
         }
+
+        requester.RequestVisibleTiles();
     }
 
     private Vector2 GetMouseWorldPosition() {

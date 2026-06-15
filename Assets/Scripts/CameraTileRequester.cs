@@ -5,7 +5,7 @@ public class CameraTileRequester : MonoBehaviour
     [Header("Connections")]
     public Camera cam;
     public CanvasManager canvas;
-
+    public float zoomOffset = 0f; // Optional offset to adjust when zoom levels change
     private bool isReady = false;
     private int lastZoomLevel = -1;
 
@@ -14,52 +14,46 @@ public class CameraTileRequester : MonoBehaviour
         RequestVisibleTiles();
     }
 
-    void Update() {
+    /*void Update() {
         if (!isReady) return;
-        RequestVisibleTiles();
-    }
+        //RequestVisibleTiles();
+    }*/
 
-    private void RequestVisibleTiles() {
+
+
+    public void RequestVisibleTiles() {
         float camHeight = 2f * cam.orthographicSize;
         float camWidth = camHeight * cam.aspect;
 
-        // ==========================================
-        // CRITICAL FIX: PROPER SCREEN-PIXEL LOD MATH
-        // ==========================================
-        // How many actual Level 0 texture pixels are visible vertically?
+
+        // Find how many actual Level 0 texture pixels are visible vertically
         float visibleLevel0PixelsY = (camHeight / canvas.worldUnitsPerTile) * canvas.tileSize;
 
         // Ratio of Texture Pixels to Screen Pixels
         float pixelRatio = visibleLevel0PixelsY / Screen.height;
 
-        // Go up a mipmap level ONLY when Texture Pixels compress too tightly into Screen Pixels
-        int desiredZoom = Mathf.FloorToInt(Mathf.Log(pixelRatio, 2));
+        // Go up a mipmap level only when Texture Pixels compress too tightly into Screen Pixels
+        // If I wanted to go up a mipmap level less often, I could use a threshold like: Mathf.Log(pixelRatio, 2) - 0.5f, which would require the texture to be half as dense before switching levels.
+        //and if I wanted to go up more often, I could add a positive offset instead of subtracting one.
+ 
+        int desiredZoom = Mathf.FloorToInt(Mathf.Log(pixelRatio, 2) + zoomOffset);
 
         int maxZoomAllowed = canvas.tables.Length - 1;
         int currentZoomLevel = Mathf.Clamp(desiredZoom, 0, maxZoomAllowed);
-        //log the max zoom and current zoom
-        Debug.Log($"Max Zoom Allowed: {maxZoomAllowed}, Desired Zoom: {desiredZoom}, Current Zoom Level: {currentZoomLevel}");
-        // =======================
-        // --- SHADER UPDATE ---
-        // =======================
+
+        //UPDATE SHADER USING CANVAS INTERFACE
         if (currentZoomLevel != lastZoomLevel) {
-            lastZoomLevel = currentZoomLevel;
-            IndirectionTable currentTable = canvas.tables[currentZoomLevel];
-
-            canvas.svtCanvasMaterial.SetTexture("_IndirectionTable", currentTable.TableTexture);
-
-            // CRITICAL FIX: Pass the true fractional sizes to the shader!
+            lastZoomLevel = currentZoomLevel;   
             float scaleMultiplier = Mathf.Pow(2, currentZoomLevel);
-            float virtualWidth = canvas.canvasWidthInTiles / scaleMultiplier;
+            Debug.Log("Scale Multiplier: " + scaleMultiplier);
+            Debug.Log("currentZoomLevel: " + currentZoomLevel);
+            float virtualWidth = canvas.canvasWidthInTiles / scaleMultiplier; 
             float virtualHeight = canvas.canvasHeightInTiles / scaleMultiplier;
-
-            canvas.svtCanvasMaterial.SetVector("_TableSize", new Vector4(virtualWidth, virtualHeight, 0, 0));
-            canvas.svtCanvasMaterial.SetVector("_TableResolution", new Vector4(currentTable.Width, currentTable.Height, 0, 0));
+            //virtual width and height are how many tiles the shader should consider as the "full" canvas at this zoom level.
+            canvas.UpdateSvtShader(currentZoomLevel, virtualWidth, virtualHeight);
         }
 
-        // ==========================================
-        // 2. FIND VISIBLE TILES AT THAT ZOOM LEVEL
-        // ==========================================
+        //FIND VISIBLE TILES FOR CURRENT ZOOM LEVEL
         Vector2 camPos = cam.transform.position;
         float minWorldX = camPos.x - (camWidth / 2f);
         float maxWorldX = camPos.x + (camWidth / 2f);
@@ -69,11 +63,6 @@ public class CameraTileRequester : MonoBehaviour
         Vector2Int minTile = canvas.WorldToTileCoordinate(new Vector2(minWorldX, minWorldY), currentZoomLevel);
         Vector2Int maxTile = canvas.WorldToTileCoordinate(new Vector2(maxWorldX, maxWorldY), currentZoomLevel);
 
-        for (int x = minTile.x; x <= maxTile.x; x++) {
-            for (int y = minTile.y; y <= maxTile.y; y++) {
-                canvas.backingStore.RequestTile(x, y, currentZoomLevel);
-            }
-        }
-        canvas.backingStore.SyncGPU();
+        canvas.RequestTiles(minTile, maxTile, currentZoomLevel);
     }
 }

@@ -633,6 +633,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: '::'
   sliderManagerUI: {fileID: 1069937483}
+  requester: {fileID: 330585548}
   brush: {fileID: 1814169578}
   cam: {fileID: 330585545}
   zoomSpeed: 3
@@ -1474,6 +1475,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CameraTileRequester
   cam: {fileID: 330585545}
   canvas: {fileID: 1102848067}
+  zoomOffset: 0
 --- !u!1 &332402565
 GameObject:
   m_ObjectHideFlags: 0
@@ -5201,6 +5203,50 @@ RectTransform:
   m_AnchoredPosition: {x: -5, y: 0}
   m_SizeDelta: {x: -20, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!1 &1883999997
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1883999999}
+  - component: {fileID: 1883999998}
+  m_Layer: 0
+  m_Name: FPSLogger
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1883999998
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1883999997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f7d5ab1ea4b52b48a92c3f54b2bc49c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FPSLogger
+--- !u!4 &1883999999
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1883999997}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -1.18822, y: 0.49101, z: -1.18701}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1897042239
 GameObject:
   m_ObjectHideFlags: 0
@@ -5490,7 +5536,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 49ded18229ccd0e4aa93f3801fe3cb80, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GhostCanvas
-  processLimitPerFrame: 10
+  processLimitPerFrame: 1
   tileSize: 256
   saveDirectory: 
   canvasManager: {fileID: 1102848067}
@@ -5702,3 +5748,4 @@ SceneRoots:
   - {fileID: 1102848066}
   - {fileID: 2093584104}
   - {fileID: 1299791990}
+  - {fileID: 1883999999}

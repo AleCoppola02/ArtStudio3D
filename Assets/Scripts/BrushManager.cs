@@ -6,8 +6,10 @@ public class BrushManager : MonoBehaviour
     [Header("Brush Settings")]
     private float lockedStrokeBrushSize = 0f;
 
-    private List<Vector2> pointBuffer = new List<Vector2>();
-    private List<Vector2> pendingStampsThisFrame = new List<Vector2>();
+    private List<Vector2> pointBuffer = new List<Vector2>(); 
+    // This stores the recent history of mouse positions for the current stroke, which we use to draw smooth Catmull-Rom curves.
+    private List<Vector2> pendingStampsThisFrame = new List<Vector2>(); 
+    // This accumulates stamp positions as we draw, and then flushes them to the BackingStore in batches for efficiency
 
     [Header("Materials & Rendering")]
     public Material brushMaterial;
@@ -85,7 +87,7 @@ public class BrushManager : MonoBehaviour
 
         float unitsPerTileAtLOD = canvasManager.worldUnitsPerTile * Mathf.Pow(2, currentZoomLevel);
         previewWorldSize = new Vector2(p2TilesX * unitsPerTileAtLOD, p2TilesY * unitsPerTileAtLOD);
-
+        // The preview quad needs to represent the exact physical size of the tiles it's drawing on
         float canvasWorldWidth = canvasManager.canvasWidthInTiles * canvasManager.worldUnitsPerTile;
         float canvasWorldHeight = canvasManager.canvasHeightInTiles * canvasManager.worldUnitsPerTile;
 
@@ -107,58 +109,53 @@ public class BrushManager : MonoBehaviour
     }
 
     public void AddPointToStroke(Vector2 worldPos) {
-        pointBuffer.Add(worldPos);
+        // We need at least 2 points in the buffer to establish a historical direction
+        if (pointBuffer.Count < 2) return;
+        // Shift the evaluation window forward so the current cursor is p2
+        Vector2 p1 = pointBuffer[pointBuffer.Count - 1]; // The last recorded mouse position
+        Vector2 p0 = pointBuffer[pointBuffer.Count - 2]; // The position before that
+        Vector2 p2 = worldPos;                           // The immediate current mouse position
 
-        if (pointBuffer.Count >= 4) {
-            Vector2 p0 = pointBuffer[pointBuffer.Count - 4];
-            Vector2 p1 = pointBuffer[pointBuffer.Count - 3];
-            Vector2 p2 = pointBuffer[pointBuffer.Count - 2];
-            Vector2 p3 = pointBuffer[pointBuffer.Count - 1];
+        // Extrapolate a temporary forward lookahead point (p3) 
+        // This projects the line forward so Catmull-Rom can draw up to the cursor instantly
+        Vector2 p3 = p2 + (p2 - p1);
 
-            float currentSpacing = GetCurrentBrushSpacing();
-            float distance = Vector2.Distance(p1, p2);
+        float currentSpacing = GetCurrentBrushSpacing();
+        float distance = Vector2.Distance(p1, p2);
 
-            float worldSize = GetCurrentWorldBrushSize();
-            int segments = Mathf.CeilToInt(distance / (worldSize * 0.25f));
-            segments = Mathf.Clamp(segments, 4, 100);
+        float worldSize = GetCurrentWorldBrushSize();
+        int segments = Mathf.CeilToInt(distance / (worldSize * 0.25f)); 
+        segments = Mathf.Clamp(segments, 4, 100); 
 
-            Vector2 lastEvalPos = p1;
+        Vector2 lastEvalPos = p1;
 
-            for (int i = 1; i <= segments; i++) {
-                float t = i / (float)segments;
-                Vector2 interpolatedWorldPos = GetCatmullRomPosition(t, p0, p1, p2, p3);
-
-                float stepDist = Vector2.Distance(lastEvalPos, interpolatedWorldPos);
-
-                while (distanceSinceLastDraw + stepDist >= currentSpacing) {
-                    float remainder = currentSpacing - distanceSinceLastDraw;
-                    float ratio = remainder / stepDist;
-
-                    Vector2 exactStampPos = Vector2.Lerp(lastEvalPos, interpolatedWorldPos, ratio);
-                    DrawStampAtWorldPos(exactStampPos);
-
-                    distanceSinceLastDraw = 0f;
-                    stepDist -= remainder;
-                    lastEvalPos = exactStampPos;
-                }
-
-                distanceSinceLastDraw += stepDist;
-                lastEvalPos = interpolatedWorldPos;
+        for (int i = 1; i <= segments; i++) {
+            float t = i / (float)segments;
+            Vector2 interpolatedWorldPos = GetCatmullRomPosition(t, p0, p1, p2, p3);
+            float stepDist = Vector2.Distance(lastEvalPos, interpolatedWorldPos);
+            while (distanceSinceLastDraw + stepDist >= currentSpacing) { 
+                float remainder = currentSpacing - distanceSinceLastDraw; 
+                float ratio = remainder / stepDist;
+                Vector2 exactStampPos = Vector2.Lerp(lastEvalPos, interpolatedWorldPos, ratio);
+                DrawStampAtWorldPos(exactStampPos);
+                distanceSinceLastDraw = 0f;
+                stepDist -= remainder;
+                lastEvalPos = exactStampPos;
             }
-
-            FlushStampsToBackingStore();
+            distanceSinceLastDraw += stepDist;
+            lastEvalPos = interpolatedWorldPos;
         }
+
+        FlushStampsToBackingStore();
+
+        // 3. Add the current point to the history buffer AFTER drawing
+        pointBuffer.Add(worldPos);
     }
 
     public void PauseStroke(Vector2 worldPos) {
-        if (pointBuffer.Count > 0) AddPointToStroke(worldPos);
-        DrawStampAtWorldPos(worldPos);
-
         pointBuffer.Clear();
         pointBuffer.Add(worldPos);
         pointBuffer.Add(worldPos);
-        distanceSinceLastDraw = 0f;
-
         FlushStampsToBackingStore();
     }
 
