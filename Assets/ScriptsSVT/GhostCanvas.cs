@@ -25,17 +25,19 @@ public class GhostCanvas : MonoBehaviour
 
     private Texture2D blankTex;
     private Color32[] clearColors;
+
+    // RAM Management
+    private TileLRU tileCache;
+    private ConcurrentDictionary<Vector3Int, byte[]> flushingCache = new ConcurrentDictionary<Vector3Int, byte[]>();
     private ConcurrentDictionary<Vector3Int, byte> pendingDiskWrites = new ConcurrentDictionary<Vector3Int, byte>();
+
     private Dictionary<Vector3Int, List<Vector2>> pendingTileJobs = new Dictionary<Vector3Int, List<Vector2>>();
     private HashSet<Vector3Int> currentStrokeTiles = new HashSet<Vector3Int>();
 
-    private ConcurrentDictionary<Vector3Int, byte[]> ramCache = new ConcurrentDictionary<Vector3Int, byte[]>();
     private ConcurrentDictionary<Vector3Int, byte[]> ghostRamCache = new ConcurrentDictionary<Vector3Int, byte[]>();
     private Dictionary<Vector3Int, RenderTexture> activeCrucibles = new Dictionary<Vector3Int, RenderTexture>();
 
     private ConcurrentQueue<(Vector3Int address, byte[] data)> diskLoadQueue = new ConcurrentQueue<(Vector3Int, byte[])>();
-
-    // NEW: Queue to tell the BackingStore to reset the IsLoaded flag if a read permanently fails
     private ConcurrentQueue<Vector3Int> diskLoadFailedQueue = new ConcurrentQueue<Vector3Int>();
     private ConcurrentDictionary<Vector3Int, byte> pendingDiskReads = new ConcurrentDictionary<Vector3Int, byte>();
     private ConcurrentQueue<(Vector3Int address, byte[] data)> flushQueue = new ConcurrentQueue<(Vector3Int, byte[])>();
@@ -54,7 +56,6 @@ public class GhostCanvas : MonoBehaviour
     private Dictionary<Vector3Int, List<Vector2>> chunkToBake = new Dictionary<Vector3Int, List<Vector2>>();
 
     private static readonly SemaphoreSlim diskIOMutex = new SemaphoreSlim(4, 4);
-
     private static readonly object[] fileLocks = new object[256];
 
     static GhostCanvas() {
@@ -95,20 +96,56 @@ public class GhostCanvas : MonoBehaviour
         batchMesh = new Mesh();
         batchMesh.MarkDynamic();
 
+        InitializeMemoryManager();
+
         ioThread = new Thread(BackgroundFlusherLoop);
         ioThread.Priority = System.Threading.ThreadPriority.BelowNormal;
         ioThread.Start();
     }
 
+    private void InitializeMemoryManager() {
+        int w = canvasManager.canvasWidthInTiles > 0 ? canvasManager.canvasWidthInTiles : 32;
+        int h = canvasManager.canvasHeightInTiles > 0 ? canvasManager.canvasHeightInTiles : 32;
+        int maxTiles = w * h;
+
+        int mipmapTiles = 0;
+        int mw = w;
+        int mh = h;
+        while (mw > 1 || mh > 1) {
+            mw = Mathf.Max(1, Mathf.CeilToInt(mw / 2f));
+            mh = Mathf.Max(1, Mathf.CeilToInt(mh / 2f));
+            mipmapTiles += (mw * mh);
+        }
+
+        int totalExpectedTiles = maxTiles + mipmapTiles + 50;
+        long bytesPerTile = tileSize * tileSize * 16;
+        long expectedRam = totalExpectedTiles * bytesPerTile;
+
+        long systemRamBytes = (long)SystemInfo.systemMemorySize * 1024L * 1024L;
+        long ramLimit = systemRamBytes / 3; // Allows using up to ~33% of total system RAM for tile cache
+
+        int maxCacheTiles = (int)(Math.Min(expectedRam, ramLimit) / bytesPerTile);
+        if (maxCacheTiles < 128) maxCacheTiles = 128; // Ensure a fallback minimum of ~128MB cache
+
+        tileCache = new TileLRU(maxCacheTiles);
+        tileCache.OnEvictDirty = (key, data) => {
+            flushingCache[key] = data; // Keep tracking it safely so we don't drop frames if immediately requested
+            pendingDiskWrites.TryAdd(key, 1);
+            flushQueue.Enqueue((key, data));
+        };
+    }
+
     private void Update() {
+        int fetchedThisFrame = 0;
         while (diskLoadQueue.TryDequeue(out var loadedTile)) {
-            ramCache[loadedTile.address] = loadedTile.data;
+            tileCache.Put(loadedTile.address, loadedTile.data, false);
             if (backingStore != null) {
                 backingStore.RefreshVisibleTiles(new HashSet<Vector3Int> { loadedTile.address });
             }
+            fetchedThisFrame++;
+            if (fetchedThisFrame >= 4) break; // Optional cap for VRAM uploads
         }
 
-        // NEW: If a background load failed, tell the BackingStore to unlock the tile so it can retry
         while (diskLoadFailedQueue.TryDequeue(out var failedAddress)) {
             if (backingStore != null) {
                 backingStore.MarkTileAsUnloaded(failedAddress);
@@ -171,9 +208,8 @@ public class GhostCanvas : MonoBehaviour
                 HashSet<Vector3Int> committedTiles = new HashSet<Vector3Int>();
 
                 foreach (var kvp in ghostRamCache) {
-                    ramCache[kvp.Key] = kvp.Value;
-                    pendingDiskWrites.TryAdd(kvp.Key, 1);
-                    flushQueue.Enqueue((kvp.Key, kvp.Value));
+                    // Update cache as dirty (so it flushes when evicted)
+                    tileCache.Put(kvp.Key, kvp.Value, true);
                     committedTiles.Add(kvp.Key);
                 }
 
@@ -321,7 +357,13 @@ public class GhostCanvas : MonoBehaviour
 
     public byte[] GetTileSynchronous(Vector3Int address) {
         if (ghostRamCache.TryGetValue(address, out byte[] ghostData)) return ghostData;
-        if (ramCache.TryGetValue(address, out byte[] data)) return data;
+        if (tileCache.TryGet(address, out byte[] data)) return data;
+
+        // Failsafe grab if we evicted it and it's currently saving
+        if (flushingCache.TryGetValue(address, out byte[] evictData)) {
+            tileCache.Put(address, evictData, false);
+            return evictData;
+        }
 
         string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
         if (File.Exists(path)) {
@@ -342,7 +384,7 @@ public class GhostCanvas : MonoBehaviour
                             }
 
                             if (read == expectedSize) {
-                                ramCache[address] = finalData;
+                                tileCache.Put(address, finalData, false);
                                 return finalData;
                             }
                             else {
@@ -379,14 +421,16 @@ public class GhostCanvas : MonoBehaviour
                     }
 
                     pendingDiskWrites.TryRemove(task.address, out _);
+                    flushingCache.TryRemove(task.address, out _);
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) {
                     flushQueue.Enqueue(task);
                     Thread.Sleep(50);
                 }
                 catch (Exception ex) {
-                    Debug.LogError("Error saving tile: " + ex.Message);
+                    Debug.LogError("Error saving evicted tile: " + ex.Message);
                     pendingDiskWrites.TryRemove(task.address, out _);
+                    flushingCache.TryRemove(task.address, out _);
                 }
             }
             else {
@@ -509,19 +553,20 @@ public class GhostCanvas : MonoBehaviour
     }
 
     public void UnloadFromRAM(Vector3Int address) {
-        if (!pendingDiskWrites.ContainsKey(address)) {
-            ramCache.TryRemove(address, out _);
-        }
+        // Now entirely handled dynamically by the LRU logic to avoid expensive disk reloading 
+        // when the user is rapidly panning around. Memory stays safe naturally.
     }
 
     public byte[] TryGetTileAsync(Vector3Int address) {
-        if (ramCache.TryGetValue(address, out byte[] data)) return data;
+        if (tileCache.TryGet(address, out byte[] data)) return data;
+        if (flushingCache.TryGetValue(address, out byte[] evictData)) {
+            tileCache.Put(address, evictData, false);
+            return evictData;
+        }
 
         string path = Path.Combine(saveDirectory, $"Tile_{address.z}_{address.x}_{address.y}.dat");
         if (File.Exists(path)) {
             if (pendingDiskReads.TryAdd(address, 1)) {
-
-                // NEW: WaitAsync prevents ThreadPool starvation when panning loads 100+ files
                 System.Threading.Tasks.Task.Run(async () =>
                 {
                     await diskIOMutex.WaitAsync();
@@ -559,7 +604,6 @@ public class GhostCanvas : MonoBehaviour
                             catch (Exception) { break; }
                         }
 
-                        // NEW: Tell the BackingStore the read failed so it can try again
                         if (!success) {
                             diskLoadFailedQueue.Enqueue(address);
                         }
@@ -617,6 +661,74 @@ public class GhostCanvas : MonoBehaviour
         if (stagingTextures != null) {
             for (int i = 0; i < stagingTextures.Length; i++) {
                 if (stagingTextures[i] != null) Destroy(stagingTextures[i]);
+            }
+        }
+    }
+
+    // Core LRU Thread-Safe Cache logic implementation
+    private class TileLRU
+    {
+        private int capacity;
+        private LinkedList<Vector3Int> lru = new LinkedList<Vector3Int>();
+        private Dictionary<Vector3Int, LinkedListNode<Vector3Int>> cache = new Dictionary<Vector3Int, LinkedListNode<Vector3Int>>();
+        private Dictionary<Vector3Int, byte[]> data = new Dictionary<Vector3Int, byte[]>();
+        private HashSet<Vector3Int> dirty = new HashSet<Vector3Int>();
+        private object sync = new object();
+
+        public Action<Vector3Int, byte[]> OnEvictDirty;
+
+        public TileLRU(int maxCapacity) {
+            this.capacity = maxCapacity;
+        }
+
+        public void Put(Vector3Int key, byte[] val, bool isDirty) {
+            byte[] evictedData = null;
+            Vector3Int evictedKey = default;
+            bool evictDirty = false;
+
+            lock (sync) {
+                if (cache.TryGetValue(key, out var node)) {
+                    lru.Remove(node);
+                    lru.AddFirst(node);
+                    data[key] = val;
+                    if (isDirty) dirty.Add(key);
+                    return;
+                }
+
+                if (cache.Count >= capacity) {
+                    var last = lru.Last;
+                    evictedKey = last.Value;
+                    evictedData = data[evictedKey];
+                    evictDirty = dirty.Contains(evictedKey);
+
+                    lru.RemoveLast();
+                    cache.Remove(evictedKey);
+                    data.Remove(evictedKey);
+                    dirty.Remove(evictedKey);
+                }
+
+                var newNode = new LinkedListNode<Vector3Int>(key);
+                lru.AddFirst(newNode);
+                cache[key] = newNode;
+                data[key] = val;
+                if (isDirty) dirty.Add(key);
+            }
+
+            if (evictDirty && evictedData != null) {
+                OnEvictDirty?.Invoke(evictedKey, evictedData);
+            }
+        }
+
+        public bool TryGet(Vector3Int key, out byte[] val) {
+            lock (sync) {
+                if (cache.TryGetValue(key, out var node)) {
+                    lru.Remove(node);
+                    lru.AddFirst(node);
+                    val = data[key];
+                    return true;
+                }
+                val = null;
+                return false;
             }
         }
     }
