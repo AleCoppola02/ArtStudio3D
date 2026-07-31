@@ -27,4 +27,4 @@ Alternatively **[Click here to download the v1.0 release build](https://github.c
 --- 
 
 ## Using Art Studio
-Use the left mouse button to draw, and the middle mouse button to pan the camera. You can zoom in and out using the scroll wheel. Since this is a prototype, you may experience issues if you create very high resolution canvases. Changing brush settings (opacity, flow, size) while the software is still rendering previous inputs will cause an error. Furthermore, Art Studio may not work properly on all graphics cards.
+Use the left mouse button to draw, and the middle mouse button to pan the camera. You can zoom in and out using the scroll wheel. Since this is a prototype, you may experience issues if you create very high resolution canvases. Changing brush settings (opacity, flow, size, color) while the software is still rendering previous inputs will cause an error. Furthermore, Art Studio may not work properly on all graphics cards.
